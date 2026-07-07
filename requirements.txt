@@ -1,0 +1,13 @@
+scikit-learn
+xgboost
+catboost
+joblib
+pandas
+numpy
+plotly
+streamlit
+reportlab
+xlsxwriter
+openpyxl
+kaleido
+pillow

@@ -1,0 +1,14 @@
+# Models
+models/
+*.joblib
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
