@@ -2,7 +2,7 @@ import pandas as pd
 
 from src.ml.feature_schema import MODEL_FEATURES
 from src.ml.model_loader import load_models
-
+from src.ml.feature_engineering import add_engineered_features
 
 def get_default_value_raw(feature):
     defaults = {
@@ -349,6 +349,7 @@ def prepare_features_encoded(project_data):
 
 def run_prediction(project_data):
     input_df = prepare_features(project_data)
+    input_df = add_engineered_features(input_df)
     models = load_models()
     predictions = {}
 

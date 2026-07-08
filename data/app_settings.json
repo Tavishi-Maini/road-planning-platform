@@ -3,7 +3,7 @@
     "database_path": "data/road_projects.db",
     "currency_format": "INR Crore",
     "unit_system": "Metric",
-    "theme_mode": "Light",
+    "theme_mode": "Dark",
     "organization_name": "RoadPlan AI",
     "report_title": "Road Construction Planning Report",
     "prepared_by": "Infrastructure Planning Team",

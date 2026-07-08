@@ -97,6 +97,27 @@ def render_prediction():
 
             st.success("Prediction completed successfully.")
 
+            st.markdown("## Prediction Output")
+
+            p1, p2, p3, p4, p5 = st.columns(5)
+
+            with p1:
+                metric_card("Total Cost", f"₹{predictions['total_cost']:.2f}", "Estimated project cost")
+
+            with p2:
+                metric_card("Duration", f"{predictions['duration']:.2f} months", "Estimated construction duration")
+
+            with p3:
+                metric_card("Material Index", f"{predictions['material_index']:.2f}", "Material intensity score")
+
+            with p4:
+                metric_card("Manpower Hours/km", f"{predictions['manpower_hours_per_km']:.2f}", "Labour intensity")
+
+            with p5:
+                metric_card("Machinery Hours/km", f"{predictions['machinery_hours_per_km']:.2f}", "Equipment intensity")
+
+            st.info("These results are now saved locally and will be used in the Results Dashboard phase.")
+
         except FileNotFoundError as e:
             friendly_error_box(
                 "Prediction could not be completed.",
@@ -129,56 +150,3 @@ def render_prediction():
                 ],
                 technical_error=e,
             )
-            
-        st.success("Prediction completed successfully.")
-
-        if result["success"]:
-            st.success("Prediction completed successfully.")
-        else:
-            st.error("Prediction failed.")
-
-        predictions = result["predictions"]
-        update_project_prediction(selected_project_id, predictions)
-
-        st.success("Prediction completed successfully.")
-
-        st.markdown("## Prediction Output")
-
-        p1, p2, p3, p4, p5 = st.columns(5)
-
-        with p1:
-            metric_card(
-                "Total Cost",
-                f"₹{predictions['total_cost']:.2f}",
-                "Estimated project cost"
-            )
-
-        with p2:
-            metric_card(
-                "Duration",
-                f"{predictions['duration']:.2f} months",
-                "Estimated construction duration"
-            )
-
-        with p3:
-            metric_card(
-                "Material Index",
-                f"{predictions['material_index']:.2f}",
-                "Material intensity score"
-            )
-
-        with p4:
-            metric_card(
-                "Manpower Hours/km",
-                f"{predictions['manpower_hours_per_km']:.2f}",
-                "Labour intensity"
-            )
-
-        with p5:
-            metric_card(
-                "Machinery Hours/km",
-                f"{predictions['machinery_hours_per_km']:.2f}",
-                "Equipment intensity"
-            )
-
-        st.info("These results are now saved locally and will be used in the Results Dashboard phase.")
