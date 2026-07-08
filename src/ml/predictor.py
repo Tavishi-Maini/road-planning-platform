@@ -2,7 +2,7 @@ import pandas as pd
 
 from src.ml.feature_schema import MODEL_FEATURES
 from src.ml.model_loader import load_models
-from src.ml.feature_engineering import add_engineered_features
+from src.ml.engineering_features import add_engineered_features
 
 def get_default_value_raw(feature):
     defaults = {
@@ -186,133 +186,241 @@ CATEGORICAL_FEATURES = [
 ]
 
 def prepare_features(project_data):
+    road_length = float(project_data.get("road_length_km", 50))
+    lanes = int(project_data.get("number_of_lanes", 4))
+    terrain = project_data.get("terrain_type", "Plain")
+    risk = project_data.get("risk_level", "Medium")
+    rainfall_zone = project_data.get("rainfall_zone", "Moderate")
+    road_category = project_data.get("road_category", "National Highway")
+
+    terrain_map = {
+        "Plain": 0,
+        "Rolling": 1,
+        "Hilly": 2,
+        "Mountainous": 3,
+    }
+
+    terrain_class = terrain_map.get(terrain, 0)
+
+    rainfall_map = {
+        "Low": 800,
+        "Moderate": 1300,
+        "High": 2000,
+        "Very High": 2800,
+    }
+
+    rain_delay_map = {
+        "Low": 12,
+        "Moderate": 25,
+        "High": 40,
+        "Very High": 60,
+    }
+
+    risk_map = {
+        "Low": 0,
+        "Medium": 1,
+        "High": 2,
+    }
+
+    road_category_base_cost = {
+        "Rural Road": 350,
+        "Urban Road": 900,
+        "State Highway": 650,
+        "National Highway": 850,
+        "Expressway": 1200,
+    }
+
+    pavement_type_map = {
+        "Flexible": 0,
+        "Rigid": 1,
+        "Composite": 2,
+    }
+
+    soil_map = {
+        "Clayey": "CL",
+        "Silty": "ML",
+        "Sandy": "SM",
+        "Gravelly": "GP",
+        "Black Cotton Soil": "CH",
+        "Rocky": "GW",
+    }
+
+    bridges_culverts = int(project_data.get("bridges_culverts", 0))
+
+    # Split combined GUI field into approximate structure counts
+    num_major_bridges = max(0, int(bridges_culverts * 0.08))
+    num_minor_bridges = max(0, int(bridges_culverts * 0.22))
+    num_culverts = max(0, bridges_culverts - num_major_bridges - num_minor_bridges)
+
+    carriageway_width = float(project_data.get("carriageway_width_m", 14))
+    shoulder_width = float(project_data.get("shoulder_width_m", 2.5))
+
+    gsb = float(project_data.get("gsb_thickness_mm", 200))
+    wmm = float(project_data.get("wmm_thickness_mm", 250))
+    dbm = float(project_data.get("dbm_thickness_mm", 100))
+    bc = float(project_data.get("bc_thickness_mm", 40))
+    concrete = float(project_data.get("concrete_thickness_mm", 0))
+
+    material_quality = float(project_data.get("material_quality_index", 80))
+    aggregate_distance = float(project_data.get("aggregate_source_distance_km", 25))
+    fuel_cost = float(project_data.get("fuel_cost_inr_litre", 95))
+    contractor_exp = float(project_data.get("contractor_experience_index", 80))
+    equipment_prod = float(project_data.get("equipment_productivity_index", 80))
+    machinery_avail = float(project_data.get("machinery_availability_pct", 85))
+    skilled_labour = float(project_data.get("skilled_labour_pct", 40))
+
+    utility_yes = project_data.get("utility_shifting_required", "No") == "Yes"
+    stabilization_yes = project_data.get("soil_stabilization_required", "No") == "Yes"
+
+    avg_rainfall = rainfall_map.get(rainfall_zone, 1300)
+    rain_delay = rain_delay_map.get(rainfall_zone, 25)
+
+    # Terrain-dependent quantities
+    cut_volume = road_length * (1800 + 900 * terrain_class)
+    fill_volume = road_length * (1600 + 700 * terrain_class)
+    rock_excavation = min(75, 4 + terrain_class * 18 + (10 if stabilization_yes else 0))
+
+    avg_gradient = {
+        0: 1.5,
+        1: 3.5,
+        2: 6.0,
+        3: 9.0,
+    }[terrain_class]
+
+    avg_side_slope = {
+        0: 2.0,
+        1: 1.8,
+        2: 1.5,
+        3: 1.2,
+    }[terrain_class]
+
+    base_cost = road_category_base_cost.get(road_category, 850)
+    base_cost *= 1 + terrain_class * 0.25
+    base_cost *= 1 + risk_map.get(risk, 1) * 0.08
+
+    # Convert GUI cost/resource inputs into model-style indices
+    diesel_price_index = fuel_cost / 90 if fuel_cost > 0 else 1.0
+    quality_factor = material_quality / 100 if material_quality > 0 else 0.8
+
+    regional_cost_index = 1.0 + terrain_class * 0.04 + risk_map.get(risk, 1) * 0.03
+    bitumen_price_index = 1.0 + (1 - quality_factor) * 0.08
+    cement_price_index = 1.0 + (1 - quality_factor) * 0.06
+    steel_price_index = 1.0 + (1 - quality_factor) * 0.07
+
     feature_values = {
-        "length_km": project_data.get("road_length_km", 10),
-        "num_lanes": project_data.get("number_of_lanes", 2),
-        "design_speed_kmh": project_data.get("design_speed_kmph", 80),
-        "terrain_class": {
-            "Plain": 0,
-            "Rolling": 1,
-            "Hilly": 2,
-            "Mountainous": 3,
-        }.get(project_data.get("terrain_type", "Plain"), 0),
-        "state_region": "Uttar Pradesh",
-        "avg_gradient_pct": 2.0,
-        "avg_side_slope_ratio": 2.0,
-        "median_width_m": 1.5,
-        "design_life_years": 20,
-        "serviceability_loss": 2.0,
-        "reliability_pct": 90,
-        "subgrade_cbr": project_data.get("subgrade_cbr_pct", 8),
-        "soil_type_predominant": {
-            "Clayey": "CL",
-            "Silty": "ML",
-            "Sandy": "SM",
-            "Gravelly": "GP",
-            "Black Cotton Soil": "CH",
-            "Rocky": "GW",
-        }.get(project_data.get("soil_type", "Sandy"), "SM"),
-        "total_pavement_thickness_mm": (
-            project_data.get("gsb_thickness_mm", 0)
-            + project_data.get("wmm_thickness_mm", 0)
-            + project_data.get("dbm_thickness_mm", 0)
-            + project_data.get("bc_thickness_mm", 0)
-            + project_data.get("concrete_thickness_mm", 0)
-        ),
-        "rigid_pavement_thickness_mm": project_data.get("concrete_thickness_mm", 0),
-        "drainage_coefficient": 1.0,
-        "avg_annual_rainfall_mm": 900,
-        "groundwater_depth_m": 5.0,
-        "seismic_zone": 3,
-        "num_culverts": project_data.get("bridges_culverts", 0),
-        "total_culvert_length_m": project_data.get("bridges_culverts", 0) * 8,
-        "num_minor_bridges": 0,
-        "num_major_bridges": 0,
-        "total_bridge_deck_area_sqm": 0,
-        "num_tunnels": 0,
-        "total_tunnel_length_m": 0,
-        "retaining_wall_length_m": 0,
-        "num_interchanges": 0,
-        
-        "cut_volume_cum": project_data.get("road_length_km", 10) * 2500,
-        "fill_volume_cum": project_data.get("road_length_km", 10) * 2200,
-        "net_earthwork_cum": project_data.get("road_length_km", 10) * 300,
-        "rock_excavation_pct": 5,
-        "borrow_area_distance_km": 15,
-        "quarry_distance_km": project_data.get("aggregate_source_distance_km", 20),
-        "average_haul_distance_km": project_data.get("aggregate_source_distance_km", 20),
-        "shrinkage_factor_pct": 8,
-        "swell_factor_pct": 12,
-        "blasting_required": 0,
-        
-        "has_toll_plaza": 0,
-        "has_truck_laybys": 0,
-        "has_rest_areas": 0,
-        
-        "pct_commercial_vehicles": 35,
-        "traffic_management_complexity": {
-            "Low": 0,
-            "Medium": 1,
-            "High": 2
-        }.get(project_data.get("risk_level", "Medium"), 1),
-        "utility_relocation_index": 30 if project_data.get("utility_shifting_required") == "Yes" else 5,
-        "crew_size": 120,
-        "working_days_per_month": 24,
-        "labour_productivity_index": project_data.get("contractor_experience_index", 70),
-        "equipment_utilization_pct": project_data.get("equipment_productivity_index", 75),
-        "equipment_availability_pct": project_data.get("machinery_availability_pct", 80),
-        "contractor_efficiency_score": project_data.get("contractor_experience_index", 70),
         "project_year": 2026,
-        "price_escalation_years": 2,
-        "base_cost_lakhs_per_km": 700,
-        "regional_cost_index": 1.0,
-        "diesel_price_index": project_data.get("fuel_cost_inr_litre", 90),
-        "bitumen_price_index": 1.0,
-        "cement_price_index": 1.0,
-        "steel_price_index": 1.0,
+        "length_km": road_length,
+        "num_lanes": lanes,
+        "design_speed_kmh": float(project_data.get("design_speed_kmph", 100)),
+        "carriageway_width_m": carriageway_width,
+        "shoulder_width_m": shoulder_width,
+        "median_width_m": 1.5 if lanes <= 4 else 3.0,
+
+        "terrain_class": terrain_class,
+        "state_region": project_data.get("location", "Uttar Pradesh"),
+        "pavement_type": pavement_type_map.get(project_data.get("pavement_type", "Flexible"), 0),
+        "design_life_years": 20,
+        "reliability_pct": 90,
+        "serviceability_loss": 2.0,
+
+        "subgrade_cbr": float(project_data.get("subgrade_cbr_pct", 8)),
+        "soil_type_predominant": soil_map.get(project_data.get("soil_type", "Sandy"), "SM"),
+
+        "avg_annual_rainfall_mm": avg_rainfall,
+        "groundwater_depth_m": max(1.5, float(project_data.get("water_body_distance_m", 500)) / 200),
+        "seismic_zone": 3 + (1 if terrain_class >= 2 else 0),
+
+        "avg_gradient_pct": avg_gradient,
+        "avg_side_slope_ratio": avg_side_slope,
+        "drainage_coefficient": 0.9 if rainfall_zone in ["High", "Very High"] else 1.0,
+
+        "gsb_thickness_mm": gsb,
+        "wmm_thickness_mm": wmm,
+        "dbm_thickness_mm": dbm,
+        "bc_thickness_mm": bc,
+        "rigid_pavement_thickness_mm": concrete,
+        "total_pavement_thickness_mm": gsb + wmm + dbm + bc + concrete,
+
+        "aadt": float(project_data.get("aadt", 10000)),
+        "vdf": float(project_data.get("vdf", 3.5)),
+        "pct_commercial_vehicles": min(55, 25 + float(project_data.get("traffic_growth_rate_pct", 5)) * 2),
+        "traffic_management_complexity": risk_map.get(risk, 1),
+
+        "num_major_bridges": num_major_bridges,
+        "num_minor_bridges": num_minor_bridges,
+        "num_culverts": num_culverts,
+        "total_bridge_deck_area_sqm": num_major_bridges * 1200 + num_minor_bridges * 250,
+        "total_culvert_length_m": num_culverts * 8,
+
+        "num_tunnels": 0 if terrain_class < 2 else max(0, int(road_length / 80)),
+        "total_tunnel_length_m": 0 if terrain_class < 2 else max(0, int(road_length / 80)) * 700,
+        "retaining_wall_length_m": road_length * terrain_class * 15,
+
+        "num_interchanges": 0 if road_category not in ["Expressway", "National Highway"] else max(1, int(road_length / 50)),
+        "has_toll_plaza": 1 if road_category in ["Expressway", "National Highway"] else 0,
+        "has_truck_laybys": 1 if road_category in ["Expressway", "National Highway"] else 0,
+        "has_rest_areas": 1 if road_category == "Expressway" else 0,
+
+        "cut_volume_cum": cut_volume,
+        "fill_volume_cum": fill_volume,
+        "net_earthwork_cum": abs(cut_volume - fill_volume),
+        "rock_excavation_pct": rock_excavation,
+        "swell_factor_pct": 12 + terrain_class * 2,
+        "shrinkage_factor_pct": 8 + terrain_class,
+
+        "average_haul_distance_km": aggregate_distance,
+        "borrow_area_distance_km": max(10, aggregate_distance * 0.8),
+        "quarry_distance_km": aggregate_distance,
+
+        "blasting_required": 1 if terrain_class >= 2 or rock_excavation > 30 else 0,
+        "utility_relocation_index": 45 if utility_yes else 8,
+        "working_days_per_month": 24 if rainfall_zone in ["Low", "Moderate"] else 21,
+        "rain_delay_days_per_year": rain_delay,
+
+        "crew_size": 80 + road_length * 0.8 + terrain_class * 20,
+        "labour_productivity_index": contractor_exp * 0.6 + skilled_labour * 0.4,
+        "equipment_availability_pct": machinery_avail,
+        "equipment_utilization_pct": equipment_prod,
+        "contractor_efficiency_score": contractor_exp,
+
+        "base_cost_lakhs_per_km": base_cost,
+        "regional_cost_index": regional_cost_index,
+        "diesel_price_index": diesel_price_index,
+        "bitumen_price_index": bitumen_price_index,
+        "cement_price_index": cement_price_index,
+        "steel_price_index": steel_price_index,
+
+        "foreign_currency_component_pct": 5 if road_category == "Expressway" else 2,
         "gst_pct": 18,
         "labour_cess_pct": 1,
-        "overhead_pct": 10,
+        "overhead_pct": 8 + risk_map.get(risk, 1),
         "profit_pct": 8,
-        "foreign_currency_component_pct": 0,
-        "escalation_pct_per_annum": project_data.get("escalation_pct", 5),
-        "carriageway_width_m": project_data.get("carriageway_width_m", 7.0),
-        "shoulder_width_m": project_data.get("shoulder_width_m", 1.5),
-        "aadt": project_data.get("aadt", 10000),
-        "vdf": project_data.get("vdf", 3.5),
-        "pavement_type": {
-            "Flexible": 0,
-            "Rigid": 1,
-            "Composite": 2,
-        }.get(project_data.get("pavement_type", "Flexible"), 0),
-        "gsb_thickness_mm": project_data.get("gsb_thickness_mm", 200),
-        "wmm_thickness_mm": project_data.get("wmm_thickness_mm", 250),
-        "dbm_thickness_mm": project_data.get("dbm_thickness_mm", 100),
-        "bc_thickness_mm": project_data.get("bc_thickness_mm", 40),
-        "contingency_pct": project_data.get("contingency_pct", 5),
-        "rain_delay_days_per_year": 30,
+        "contingency_pct": float(project_data.get("contingency_pct", 5)),
+        "escalation_pct_per_annum": float(project_data.get("escalation_pct", 5)),
+        "price_escalation_years": 2,
     }
-    
-    CATEGORICAL_COLUMNS = [
-        "state_region",
-        "soil_type_predominant",
-    ]
 
     input_df = pd.DataFrame([feature_values])
+
+    # Ensure all training features exist
     for feature in MODEL_FEATURES:
         if feature not in input_df.columns:
-            if feature in CATEGORICAL_COLUMNS:
-                input_df[feature] = "Uttar Pradesh" if feature == "state_region" else "SM"  # Default categorical value
+            if feature == "state_region":
+                input_df[feature] = "Uttar Pradesh"
+            elif feature == "soil_type_predominant":
+                input_df[feature] = "SM"
             else:
                 input_df[feature] = 0
-                
+
     input_df = input_df[MODEL_FEATURES]
-    
+
+    categorical_columns = ["state_region", "soil_type_predominant"]
+
     for col in input_df.columns:
-        if col in CATEGORICAL_COLUMNS:
-            input_df[col]=input_df[col].astype(str)
+        if col in categorical_columns:
+            input_df[col] = input_df[col].astype(str)
         else:
-            input_df[col]=pd.to_numeric(input_df[col], errors="coerce").fillna(0)
+            input_df[col] = pd.to_numeric(input_df[col], errors="coerce").fillna(0)
 
     return input_df
 
@@ -349,7 +457,10 @@ def prepare_features_encoded(project_data):
 
 def run_prediction(project_data):
     input_df = prepare_features(project_data)
+
+    # Add the same engineered features used during training
     input_df = add_engineered_features(input_df)
+
     models = load_models()
     predictions = {}
 
