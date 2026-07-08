@@ -1,14 +1,29 @@
-# Models
-models/
-*.joblib
-
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
 
-# Virtual environment
+# Virtual Environment
 .venv/
 venv/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Models
+models/
+*.joblib
+*.cbm
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Python cache
+.pytest_cache/
