@@ -12,6 +12,9 @@ from src.pages.reports import render_reports
 from src.pages.settings import render_settings
 from src.database.demo_seed import seed_demo_projects
 from src.database.project_repository import delete_duplicate_projects
+from download_models import download_models
+
+download_models()
 
 st.set_page_config(
     page_title="RoadPlan AI",
