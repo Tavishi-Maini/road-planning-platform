@@ -5,11 +5,11 @@ MODEL_DIR = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 MODEL_FILES = {
-    "total_cost_model.joblib": "https://drive.google.com/file/d/1AbKvOPEBzewgr4HrMcbjbiQyafzWxpGW/view?usp=sharing",
-    "duration_model.joblib": "https://drive.google.com/file/d/1vUKAazUURVBvDtjP-CxFD4BubgzjTIe3/view?usp=sharing",
-    "material_index_model.joblib": "https://drive.google.com/file/d/1V_vS_tTwa0XZK5Md5mFk9ItpvYTxOdDm/view?usp=sharing",
-    "manpower_model.joblib": "https://drive.google.com/file/d/1Yy0CluU77r73n5VFnROgQJigSVjSFzyF/view?usp=drive_link",
-    "machinery_model.joblib": "https://drive.google.com/file/d/1abOdpX3cqUaZCzO65letEVtMoXZMBq3E/view?usp=sharing",
+    "total_cost_model.joblib": "1AbKvOPEBzewgr4HrMcbjbiQyafzWxpGW",
+    "duration_model.joblib": "1vUKAazUURVBvDtjP-CxFD4BubgzjTIe3",
+    "material_index_model.joblib": "1V_vS_tTwa0XZK5Md5mFk9ItpvYTxOdDm",
+    "manpower_model.joblib": "1Yy0CluU77r73n5VFnROgQJigSVjSFzyF",
+    "machinery_model.joblib": "1abOdpX3cqUaZCzO65letEVtMoXZMBq3E",
 }
 
 def download_models():
@@ -20,7 +20,7 @@ def download_models():
             print(f"Already exists: {filename}")
             continue
 
-        url = f"https://drive.google.com/uc?id={file_id}"
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
         print(f"Downloading {filename}...")
         gdown.download(url, path, quiet=False)
 
