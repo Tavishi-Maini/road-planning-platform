@@ -48,7 +48,7 @@ def save_project(project_data):
             project_data["project_name"],
             project_data["location"],
             project_data["road_category"],
-            project_data["project_type"],
+            project_data.get("project_type", "New Construction"),
             project_data["terrain_type"],
             project_data["road_length_km"],
             project_data["number_of_lanes"],

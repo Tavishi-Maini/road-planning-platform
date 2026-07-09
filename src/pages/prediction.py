@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from src.ml.model_loader import load_models
 from src.ml.predictor import prepare_features
+from src.utils.formatters import format_cost_lakhs_as_cr
 
 from src.ui.components import page_header, metric_card, friendly_error_box
 from src.database.project_repository import (
@@ -102,7 +103,7 @@ def render_prediction():
             p1, p2, p3, p4, p5 = st.columns(5)
 
             with p1:
-                metric_card("Total Cost", f"₹{predictions['total_cost']:.2f}", "Estimated project cost")
+                metric_card("Total Cost", format_cost_lakhs_as_cr(predictions["total_cost"]), "Estimated project cost")
 
             with p2:
                 metric_card("Duration", f"{predictions['duration']:.2f} months", "Estimated construction duration")

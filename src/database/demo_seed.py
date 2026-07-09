@@ -13,6 +13,7 @@ def seed_demo_projects():
             "location": "Uttar Pradesh",
             "project_owner": "NHAI",
             "road_category": "National Highway",
+            "project_type": "New Construction",
             "terrain_type": "Plain",
             "project_stage": "DPR",
             "road_length_km": 42,
