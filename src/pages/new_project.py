@@ -233,7 +233,10 @@ def render_new_project():
     st.caption(f"{completed}/{len(required_fields)} required fields completed")
 
     st.markdown("---")
-    st.markdown("## Saved Projects")
+    st.markdown("## Project Manager")
+    st.info(
+        "Manage saved road projects here. You can load details, review saved inputs, or delete outdated test projects."
+    )
 
     projects_df = get_all_projects()
 
@@ -254,24 +257,30 @@ def render_new_project():
 
         selected_project_id = project_options[selected_project]
 
-        col1, col2 = st.columns(2)
-
+        col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("Load Project Details", width="stretch"):
+            if st.button("👁 Load Details", width="stretch"):
                 project_data = get_project_by_id(selected_project_id)
                 st.json(project_data)
-
         with col2:
-            if st.button( "🗑 Delete Project", key=f"delete_btn_{selected_project_id}", width="stretch"):
+            if st.button("➡️ Predict This Project", width="stretch"):
+                st.session_state.active_page = "Prediction"
+                st.rerun()
+        with col3:
+            if st.button(
+                "🗑 Delete Project",
+                key=f"delete_btn_{selected_project_id}",
+                width="stretch"
+            ):
                 st.session_state.delete_project_id = selected_project_id
-
+    
     if st.session_state.delete_project_id is not None:
         project = get_project_by_id(
             st.session_state.delete_project_id
         )
         st.warning(
             f"Are you sure you want to permanently delete "
-            f"**{project['project_name']}**?"
+            f"**{project['project_name']}**? This action cannot be undone."
         )
 
         c1, c2 = st.columns(2)
@@ -284,8 +293,8 @@ def render_new_project():
                 delete_project(
                     st.session_state.delete_project_id
                 )
-                st.success("Project deleted successfully.")
                 st.session_state.delete_project_id = None
+                st.success("Project deleted successfully.")
                 st.rerun()
 
         with c2:
@@ -373,4 +382,6 @@ def render_new_project():
         st.markdown("### Saved Project Preview")
         st.json(project_data)
 
-        st.button("Proceed to Prediction", width="stretch")
+        if st.button("➡️ Proceed to Prediction", width="stretch"):
+            st.session_state.active_page = "Prediction"
+            st.rerun()
