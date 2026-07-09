@@ -2,6 +2,8 @@
 
 An AI-powered Road Construction Planning Platform that predicts key project metrics using Machine Learning and provides an interactive decision-support dashboard for planners, engineers, contractors, and government agencies.
 
+Live Demo: https://road-planning-platform.streamlit.app/
+
 ---
 
 ## 📌 Overview
