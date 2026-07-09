@@ -229,7 +229,7 @@ def prepare_features(project_data):
         "Urban Road": 180,
         "State Highway": 220,
         "National Highway": 280,
-        "Expressway": 450,
+        "Expressway": 650,
     }
 
     pavement_type_map = {
@@ -284,7 +284,7 @@ def prepare_features(project_data):
     else:
         average_haul_distance = aggregate_distance
         quarry_distance = aggregate_distance
-        borrow_distance = max(10, aggregate_distance * 0.8)
+        borrow_distance = max(8, aggregate_distance * 0.55)
     
     contractor_exp = float(project_data.get("contractor_experience_index", 80))
     equipment_prod = float(project_data.get("equipment_productivity_index", 80))
@@ -560,7 +560,11 @@ def run_prediction(project_data):
 
     for target_name, model in models.items():
         prediction = model.predict(input_df)[0]
-        predictions[target_name] = float(prediction)
+        prediction = float(prediction)
+        if target_name == "material_index":
+            prediction = np.clip(prediction, 123.0, 150.0)
+            
+        predictions[target_name] = prediction
 
     return {
         "success": True,
