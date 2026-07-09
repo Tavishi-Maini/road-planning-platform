@@ -1,12 +1,14 @@
 import json
+import io
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from PIL import Image, ImageDraw, ImageFont
 
 from src.ui.components import page_header, metric_card
-from src.database.project_repository import get_all_projects, delete_project
-import io
-from PIL import Image, ImageDraw, ImageFont
+from src.database.project_repository import get_all_projects
+
 
 def format_cr(value):
     return f"₹{value:,.2f} Cr"
@@ -20,16 +22,132 @@ def parse_prediction_data(row):
     except Exception:
         return {}
 
+
 def fig_to_png_bytes(fig):
     try:
         return fig.to_image(format="png", scale=2)
     except Exception:
         return None
 
+
+def safe_download_plotly_chart(fig, label, file_name, key):
+    png_bytes = fig_to_png_bytes(fig)
+
+    if png_bytes is not None:
+        st.download_button(
+            label=label,
+            data=png_bytes,
+            file_name=file_name,
+            mime="image/png",
+            width="stretch",
+            key=key,
+        )
+    else:
+        st.caption(
+            "PNG export requires Chrome/Kaleido and may not be available on Streamlit Cloud."
+        )
+
+
+def load_fonts():
+    try:
+        title_font = ImageFont.truetype("DejaVuSans.ttf", 48)
+        heading_font = ImageFont.truetype("DejaVuSans.ttf", 30)
+        value_font = ImageFont.truetype("DejaVuSans.ttf", 34)
+        small_font = ImageFont.truetype("DejaVuSans.ttf", 22)
+    except Exception:
+        title_font = ImageFont.load_default()
+        heading_font = ImageFont.load_default()
+        value_font = ImageFont.load_default()
+        small_font = ImageFont.load_default()
+
+    return title_font, heading_font, value_font, small_font
+
+
+def create_dashboard_summary_png(
+    total_projects,
+    completed_count,
+    pending_count,
+    avg_cost,
+    avg_cost_per_km,
+    avg_duration,
+    most_expensive_project,
+):
+    width, height = 1400, 800
+    image = Image.new("RGB", (width, height), "#F5F7FA")
+    draw = ImageDraw.Draw(image)
+
+    title_font, heading_font, value_font, small_font = load_fonts()
+
+    draw.text(
+        (60, 50),
+        "RoadPlan AI - Dashboard Summary",
+        fill="#111827",
+        font=title_font,
+    )
+
+    cards = [
+        ("Total Projects", str(total_projects)),
+        ("Projects Completed", str(completed_count)),
+        ("Pending Prediction", str(pending_count)),
+        ("Average Cost", format_cr(avg_cost) if pd.notna(avg_cost) else "N/A"),
+        ("Average Cost/km", format_cr(avg_cost_per_km) if pd.notna(avg_cost_per_km) else "N/A"),
+        ("Average Duration", f"{avg_duration:.2f} months" if pd.notna(avg_duration) else "N/A"),
+        ("Most Expensive Project", most_expensive_project),
+    ]
+
+    x_positions = [60, 500, 940]
+    y_positions = [170, 380, 590]
+
+    card_width = 360
+    card_height = 150
+    index = 0
+
+    for y in y_positions:
+        for x in x_positions:
+            if index >= len(cards):
+                break
+
+            title, value = cards[index]
+
+            draw.rounded_rectangle(
+                (x, y, x + card_width, y + card_height),
+                radius=20,
+                fill="#FFFFFF",
+                outline="#E5E7EB",
+                width=2,
+            )
+
+            draw.rectangle(
+                (x, y, x + 8, y + card_height),
+                fill="#F59E0B",
+            )
+
+            draw.text(
+                (x + 25, y + 25),
+                title,
+                fill="#6B7280",
+                font=heading_font,
+            )
+
+            draw.text(
+                (x + 25, y + 75),
+                str(value)[:28],
+                fill="#111827",
+                font=value_font,
+            )
+
+            index += 1
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+
 def render_dashboard():
     page_header(
         "Dashboard",
-        "Executive overview of road planning projects, predictions, and infrastructure analytics"
+        "Executive overview of road planning projects, predictions, and infrastructure analytics",
     )
 
     projects = get_all_projects()
@@ -39,7 +157,6 @@ def render_dashboard():
         return
 
     projects = projects.copy()
-
     projects["prediction_dict"] = projects.apply(parse_prediction_data, axis=1)
 
     projects["total_cost_lakhs"] = projects["prediction_dict"].apply(
@@ -60,11 +177,8 @@ def render_dashboard():
             if pd.notna(row["total_cost_cr"]) and row["road_length_km"] > 0
             else None
         ),
-        axis=1
+        axis=1,
     )
-
-    completed_projects = projects[projects["prediction_status"] == "Completed"]
-    pending_projects = projects[projects["prediction_status"] != "Completed"]
 
     st.markdown("## Search & Filter Projects")
 
@@ -73,36 +187,39 @@ def render_dashboard():
     with filter_col1:
         search_query = st.text_input(
             "Search project",
-            placeholder="Search by project name or location"
+            placeholder="Search by project name or location",
         )
 
     with filter_col2:
         selected_state = st.selectbox(
             "Filter by State / Location",
-            ["All"] + sorted(projects["location"].dropna().unique().tolist())
+            ["All"] + sorted(projects["location"].dropna().unique().tolist()),
         )
 
     with filter_col3:
         selected_status = st.selectbox(
             "Filter by Prediction Status",
-            ["All"] + sorted(projects["prediction_status"].dropna().unique().tolist())
+            ["All"] + sorted(projects["prediction_status"].dropna().unique().tolist()),
         )
 
     filter_col4, filter_col5, filter_col6 = st.columns(3)
+
     with filter_col4:
         selected_road_type = st.selectbox(
             "Filter by Road Type",
-            ["All"] + sorted(projects["road_category"].dropna().unique().tolist())
+            ["All"] + sorted(projects["road_category"].dropna().unique().tolist()),
         )
+
     with filter_col5:
         selected_terrain = st.selectbox(
             "Filter by Terrain",
-            ["All"] + sorted(projects["terrain_type"].dropna().unique().tolist())
+            ["All"] + sorted(projects["terrain_type"].dropna().unique().tolist()),
         )
+
     with filter_col6:
         selected_risk = st.selectbox(
             "Filter by Risk Level",
-            ["All"] + sorted(projects["risk_level"].dropna().unique().tolist())
+            ["All"] + sorted(projects["risk_level"].dropna().unique().tolist()),
         )
 
     filtered_projects = projects.copy()
@@ -114,9 +231,7 @@ def render_dashboard():
         ]
 
     if selected_state != "All":
-        filtered_projects = filtered_projects[
-            filtered_projects["location"] == selected_state
-        ]
+        filtered_projects = filtered_projects[filtered_projects["location"] == selected_state]
 
     if selected_status != "All":
         filtered_projects = filtered_projects[
@@ -161,7 +276,7 @@ def render_dashboard():
     if not completed_projects.empty:
         most_expensive_project = completed_projects.sort_values(
             "total_cost_cr",
-            ascending=False
+            ascending=False,
         ).iloc[0]["project_name"]
     else:
         most_expensive_project = "N/A"
@@ -171,32 +286,16 @@ def render_dashboard():
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        metric_card(
-            "Total Projects",
-            total_projects,
-            "Saved planning cases"
-        )
+        metric_card("Total Projects", total_projects, "Saved planning cases")
 
     with c2:
-        metric_card(
-            "Projects Completed",
-            completed_count,
-            "Predictions available"
-        )
+        metric_card("Projects Completed", completed_count, "Predictions available")
 
     with c3:
-        metric_card(
-            "Pending Prediction",
-            pending_count,
-            "Awaiting AI estimation"
-        )
+        metric_card("Pending Prediction", pending_count, "Awaiting AI estimation")
 
     with c4:
-        metric_card(
-            "Most Expensive Project",
-            most_expensive_project,
-            "Highest predicted cost"
-        )
+        metric_card("Most Expensive Project", most_expensive_project, "Highest predicted cost")
 
     c5, c6, c7 = st.columns(3)
 
@@ -204,21 +303,21 @@ def render_dashboard():
         metric_card(
             "Average Cost",
             format_cr(avg_cost) if pd.notna(avg_cost) else "N/A",
-            "Across completed projects"
+            "Across completed projects",
         )
 
     with c6:
         metric_card(
             "Average Cost/km",
             format_cr(avg_cost_per_km) if pd.notna(avg_cost_per_km) else "N/A",
-            "Normalized project cost"
+            "Normalized project cost",
         )
 
     with c7:
         metric_card(
             "Average Duration",
             f"{avg_duration:.2f} months" if pd.notna(avg_duration) else "N/A",
-            "Across completed projects"
+            "Across completed projects",
         )
 
     st.markdown("## Project Portfolio")
@@ -255,7 +354,7 @@ def render_dashboard():
             "duration_months": "Duration",
             "created_at": "Created At",
         },
-        inplace=True
+        inplace=True,
     )
 
     display_df["Total Cost"] = display_df["Total Cost"].apply(
@@ -273,7 +372,7 @@ def render_dashboard():
     st.dataframe(
         display_df,
         width="stretch",
-        hide_index=True
+        hide_index=True,
     )
 
     if completed_projects.empty:
@@ -293,20 +392,20 @@ def render_dashboard():
 
     cost_fig.update_traces(
         texttemplate="₹%{y:.2f} Cr",
-        textposition="outside"
+        textposition="outside",
     )
 
     cost_fig.update_layout(
         height=450,
         xaxis_title="Project",
         yaxis_title="Total Cost (₹ Cr)",
-        title_x=0.02
+        title_x=0.02,
     )
 
     st.plotly_chart(
         cost_fig,
         width="stretch",
-        key="dashboard_total_cost_chart"
+        key="dashboard_total_cost_chart",
     )
 
     st.markdown("## Cost per km Analytics")
@@ -322,20 +421,20 @@ def render_dashboard():
 
     cost_per_km_fig.update_traces(
         texttemplate="₹%{y:.2f} Cr/km",
-        textposition="outside"
+        textposition="outside",
     )
 
     cost_per_km_fig.update_layout(
         height=450,
         xaxis_title="Project",
         yaxis_title="Cost per km (₹ Cr/km)",
-        title_x=0.02
+        title_x=0.02,
     )
 
     st.plotly_chart(
         cost_per_km_fig,
         width="stretch",
-        key="dashboard_cost_per_km_chart"
+        key="dashboard_cost_per_km_chart",
     )
 
     st.markdown("## Duration Analytics")
@@ -351,20 +450,20 @@ def render_dashboard():
 
     duration_fig.update_traces(
         texttemplate="%{y:.2f} months",
-        textposition="outside"
+        textposition="outside",
     )
 
     duration_fig.update_layout(
         height=450,
         xaxis_title="Project",
         yaxis_title="Duration (months)",
-        title_x=0.02
+        title_x=0.02,
     )
 
     st.plotly_chart(
         duration_fig,
         width="stretch",
-        key="dashboard_duration_chart"
+        key="dashboard_duration_chart",
     )
 
     st.markdown("## Project Status Distribution")
@@ -376,21 +475,22 @@ def render_dashboard():
         status_df,
         names="Prediction Status",
         values="Count",
-        title="Completed vs Pending Projects"
+        title="Completed vs Pending Projects",
     )
 
     status_fig.update_layout(
         height=420,
-        title_x=0.02
+        title_x=0.02,
     )
 
     st.plotly_chart(
         status_fig,
         width="stretch",
-        key="dashboard_status_distribution_chart"
+        key="dashboard_status_distribution_chart",
     )
-    
+
     st.markdown("## Export Dashboard")
+
     dashboard_png = create_dashboard_summary_png(
         total_projects=total_projects,
         completed_count=completed_count,
@@ -407,134 +507,33 @@ def render_dashboard():
         file_name="roadplan_dashboard_summary.png",
         mime="image/png",
         width="stretch",
-    )
-    png_bytes = fig_to_png_bytes(cost_fig)
-
-    if png_bytes is not None:
-        st.download_button(
-            label="Download Chart",
-            data=png_bytes,
-            file_name="cost_chart.png",
-            mime="image/png"
-        )
-    else:
-        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
-    
-    png_bytes = fig_to_png_bytes(cost_per_km_fig)
-
-    if png_bytes is not None:
-        st.download_button(
-            label="📥 Download Cost per km Chart PNG",
-            data=png_bytes,
-            file_name="cost_per_km_analytics.png",
-            mime="image/png"
-        )
-    else:
-        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
-
-    png_bytes = fig_to_png_bytes(duration_fig)
-    if png_bytes is not None:
-        st.download_button(
-            label="📥 Download Duration Chart PNG",
-            data=png_bytes,
-            file_name="duration_analytics.png",
-            mime="image/png"
-        )
-    else:
-        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
-
-    png_bytes = fig_to_png_bytes(status_fig)
-    if png_bytes is not None:
-        st.download_button(
-            label="📥 Download Status Distribution PNG",
-            data=png_bytes,
-            file_name="project_status_distribution.png",
-            mime="image/png"
-        )
-    else:
-        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
-
-
-def create_dashboard_summary_png(
-    total_projects,
-    completed_count,
-    pending_count,
-    avg_cost,
-    avg_cost_per_km,
-    avg_duration,
-    most_expensive_project,
-):
-    width, height = 1400, 800
-    image = Image.new("RGB", (width, height), "#F5F7FA")
-    draw = ImageDraw.Draw(image)
-
-    title_font = ImageFont.load_default(size=48)
-    heading_font = ImageFont.load_default(size=30)
-    value_font = ImageFont.load_default(size=34)
-    small_font = ImageFont.load_default(size=22)
-
-    draw.text(
-        (60, 50),
-        "RoadPlan AI - Dashboard Summary",
-        fill="#111827",
-        font=title_font,
+        key="download_dashboard_summary",
     )
 
-    cards = [
-        ("Total Projects", str(total_projects)),
-        ("Projects Completed", str(completed_count)),
-        ("Pending Prediction", str(pending_count)),
-        ("Average Cost", format_cr(avg_cost) if pd.notna(avg_cost) else "N/A"),
-        ("Average Cost/km", format_cr(avg_cost_per_km) if pd.notna(avg_cost_per_km) else "N/A"),
-        ("Average Duration", f"{avg_duration:.2f} months" if pd.notna(avg_duration) else "N/A"),
-        ("Most Expensive Project", most_expensive_project),
-    ]
+    safe_download_plotly_chart(
+        cost_fig,
+        "📥 Download Cost Chart PNG",
+        "cost_chart.png",
+        "download_cost_chart",
+    )
 
-    x_positions = [60, 500, 940]
-    y_positions = [170, 380, 590]
+    safe_download_plotly_chart(
+        cost_per_km_fig,
+        "📥 Download Cost per km Chart PNG",
+        "cost_per_km_analytics.png",
+        "download_cost_per_km_chart",
+    )
 
-    card_width = 360
-    card_height = 150
+    safe_download_plotly_chart(
+        duration_fig,
+        "📥 Download Duration Chart PNG",
+        "duration_analytics.png",
+        "download_duration_chart",
+    )
 
-    index = 0
-
-    for y in y_positions:
-        for x in x_positions:
-            if index >= len(cards):
-                break
-
-            title, value = cards[index]
-
-            draw.rounded_rectangle(
-                (x, y, x + card_width, y + card_height),
-                radius=20,
-                fill="#FFFFFF",
-                outline="#E5E7EB",
-                width=2,
-            )
-
-            draw.rectangle(
-                (x, y, x + 8, y + card_height),
-                fill="#F59E0B",
-            )
-
-            draw.text(
-                (x + 25, y + 25),
-                title,
-                fill="#6B7280",
-                font=heading_font,
-            )
-
-            draw.text(
-                (x + 25, y + 75),
-                str(value)[:28],
-                fill="#111827",
-                font=value_font,
-            )
-
-            index += 1
-
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer
+    safe_download_plotly_chart(
+        status_fig,
+        "📥 Download Status Distribution PNG",
+        "project_status_distribution.png",
+        "download_status_chart",
+    )
