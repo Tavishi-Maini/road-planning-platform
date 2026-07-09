@@ -403,13 +403,18 @@ def render_dashboard():
         mime="image/png",
         width="stretch",
     )
-    st.download_button(
-        label="📥 Download Cost Chart PNG",
-        data=fig_to_png_bytes(cost_fig),
-        file_name="cost_analytics.png",
-        mime="image/png",
-        width="stretch",
-    )
+    png_bytes = fig_to_png_bytes(cost_fig)
+
+    if png_bytes is not None:
+        st.download_button(
+            label="Download Chart",
+            data=png_bytes,
+            file_name="cost_chart.png",
+            mime="image/png"
+        )
+    else:
+        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
+    
     st.download_button(
         label="📥 Download Cost per km Chart PNG",
         data=fig_to_png_bytes(cost_per_km_fig),
@@ -434,7 +439,10 @@ def render_dashboard():
     
     
 def fig_to_png_bytes(fig):
-    return fig.to_image(format="png", scale=2)
+    try:
+        return fig.to_image(format="png", scale=2)
+    except Exception:
+        return None
 
 
 def create_dashboard_summary_png(
