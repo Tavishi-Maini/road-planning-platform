@@ -1,4 +1,6 @@
 import pandas as pd
+import streamlit as st
+import numpy as np
 
 from src.ml.feature_schema import MODEL_FEATURES
 from src.ml.model_loader import load_models
@@ -210,10 +212,10 @@ def prepare_features(project_data):
     }
 
     rain_delay_map = {
-        "Low": 12,
-        "Moderate": 25,
-        "High": 40,
-        "Very High": 60,
+        "Low": 4,
+        "Moderate": 10,
+        "High": 24,
+        "Very High": 40,
     }
 
     risk_map = {
@@ -223,11 +225,11 @@ def prepare_features(project_data):
     }
 
     road_category_base_cost = {
-        "Rural Road": 350,
-        "Urban Road": 900,
-        "State Highway": 650,
-        "National Highway": 850,
-        "Expressway": 1200,
+        "Rural Road": 120,
+        "Urban Road": 180,
+        "State Highway": 220,
+        "National Highway": 280,
+        "Expressway": 450,
     }
 
     pavement_type_map = {
@@ -247,11 +249,21 @@ def prepare_features(project_data):
 
     bridges_culverts = int(project_data.get("bridges_culverts", 0))
 
-    # Split combined GUI field into approximate structure counts
-    num_major_bridges = max(0, int(bridges_culverts * 0.08))
-    num_minor_bridges = max(0, int(bridges_culverts * 0.22))
-    num_culverts = max(0, bridges_culverts - num_major_bridges - num_minor_bridges)
+    if terrain_class == 0:  # Plain
+        num_major_bridges = max(0, int(bridges_culverts * 0.03))
+        num_minor_bridges = max(0, int(bridges_culverts * 0.12))
+    elif terrain_class == 1:  # Rolling
+        num_major_bridges = max(0, int(bridges_culverts * 0.05))
+        num_minor_bridges = max(0, int(bridges_culverts * 0.18))
+    elif terrain_class == 2:  # Hilly
+        num_major_bridges = max(0, int(bridges_culverts * 0.08))
+        num_minor_bridges = max(0, int(bridges_culverts * 0.25))
+    else:  # Mountainous
+        num_major_bridges = max(0, int(bridges_culverts * 0.10))
+        num_minor_bridges = max(0, int(bridges_culverts * 0.30))
 
+    num_culverts = max(0, bridges_culverts - num_major_bridges - num_minor_bridges) 
+        
     carriageway_width = float(project_data.get("carriageway_width_m", 14))
     shoulder_width = float(project_data.get("shoulder_width_m", 2.5))
 
@@ -264,6 +276,16 @@ def prepare_features(project_data):
     material_quality = float(project_data.get("material_quality_index", 80))
     aggregate_distance = float(project_data.get("aggregate_source_distance_km", 25))
     fuel_cost = float(project_data.get("fuel_cost_inr_litre", 95))
+    
+    if terrain_class == 0:
+        average_haul_distance = max(8, aggregate_distance*0.6)
+        quarry_distance = max(8, aggregate_distance*0.6)
+        borrow_distance = max(5, aggregate_distance*0.3)
+    else:
+        average_haul_distance = aggregate_distance
+        quarry_distance = aggregate_distance
+        borrow_distance = max(10, aggregate_distance * 0.8)
+    
     contractor_exp = float(project_data.get("contractor_experience_index", 80))
     equipment_prod = float(project_data.get("equipment_productivity_index", 80))
     machinery_avail = float(project_data.get("machinery_availability_pct", 85))
@@ -299,13 +321,66 @@ def prepare_features(project_data):
     base_cost *= 1 + risk_map.get(risk, 1) * 0.08
 
     # Convert GUI cost/resource inputs into model-style indices
-    diesel_price_index = fuel_cost / 90 if fuel_cost > 0 else 1.0
     quality_factor = material_quality / 100 if material_quality > 0 else 0.8
 
-    regional_cost_index = 1.0 + terrain_class * 0.04 + risk_map.get(risk, 1) * 0.03
-    bitumen_price_index = 1.0 + (1 - quality_factor) * 0.08
-    cement_price_index = 1.0 + (1 - quality_factor) * 0.06
-    steel_price_index = 1.0 + (1 - quality_factor) * 0.07
+    # Convert quality and logistics into market-style price indices.
+    distance_factor = min(0.25, aggregate_distance / 200)
+    quality_penalty = (100 - material_quality) / 100
+    
+    # -------------------------------------------------
+    # MARKET PRICE INDICES
+    # (Matches training dataset scale ~60–200)
+    # -------------------------------------------------
+
+    quality = float(project_data.get("material_quality_index", 80))
+    aggregate_distance = float(project_data.get("aggregate_source_distance_km", 20))
+    fuel_cost = float(project_data.get("fuel_cost_inr_litre", 95))
+
+    terrain_multiplier = {
+        0: 1.00,
+        1: 1.05,
+        2: 1.12,
+        3: 1.20,
+    }[terrain_class]
+
+    risk_multiplier = {
+        "Low": 1.00,
+        "Medium": 1.05,
+        "High": 1.12,
+    }.get(risk, 1.00)
+
+    distance_factor = aggregate_distance / 100.0
+    quality_penalty = (100 - quality) / 100.0
+    regional_cost_index = (
+        100
+        * terrain_multiplier
+        * risk_multiplier
+    )
+    bitumen_price_index = (
+        100
+        + 0.60 * quality
+        + 0.35 * aggregate_distance
+    )
+    cement_price_index = (
+        100
+        + 0.40 * quality
+        + 0.22 * aggregate_distance
+    )
+    steel_price_index = (
+        100
+        + 0.45 * quality
+        + 0.30 * aggregate_distance
+    )
+    diesel_price_index = (
+        fuel_cost * 1.18
+    )
+
+    regional_cost_index = np.clip(regional_cost_index, 70, 190)
+    bitumen_price_index = np.clip(bitumen_price_index, 50, 200)
+    cement_price_index = np.clip(cement_price_index, 60, 200)
+    steel_price_index = np.clip(steel_price_index, 50, 200)
+    diesel_price_index = np.clip(diesel_price_index, 60, 200)
+
 
     feature_values = {
         "project_year": 2026,
@@ -349,7 +424,7 @@ def prepare_features(project_data):
         "num_major_bridges": num_major_bridges,
         "num_minor_bridges": num_minor_bridges,
         "num_culverts": num_culverts,
-        "total_bridge_deck_area_sqm": num_major_bridges * 1200 + num_minor_bridges * 250,
+        "total_bridge_deck_area_sqm": num_major_bridges * 600 + num_minor_bridges * 120,
         "total_culvert_length_m": num_culverts * 8,
 
         "num_tunnels": 0 if terrain_class < 2 else max(0, int(road_length / 80)),
@@ -368,9 +443,9 @@ def prepare_features(project_data):
         "swell_factor_pct": 12 + terrain_class * 2,
         "shrinkage_factor_pct": 8 + terrain_class,
 
-        "average_haul_distance_km": aggregate_distance,
-        "borrow_area_distance_km": max(10, aggregate_distance * 0.8),
-        "quarry_distance_km": aggregate_distance,
+        "average_haul_distance_km": average_haul_distance,
+        "borrow_area_distance_km": borrow_distance,
+        "quarry_distance_km": quarry_distance,
 
         "blasting_required": 1 if terrain_class >= 2 or rock_excavation > 30 else 0,
         "utility_relocation_index": 45 if utility_yes else 8,
@@ -457,6 +532,25 @@ def prepare_features_encoded(project_data):
 
 def run_prediction(project_data):
     input_df = prepare_features(project_data)
+    
+    st.subheader("🔍 Model Input Debug")
+
+    debug_columns = [
+        "bitumen_price_index",
+        "cement_price_index",
+        "steel_price_index",
+        "diesel_price_index",
+        "material_transport_stress",
+        "economic_price_index",
+        "regional_cost_index",
+    ]
+
+    available = [c for c in debug_columns if c in input_df.columns]
+
+    st.dataframe(
+        input_df[available].T.rename(columns={0: "Value"}),
+        use_container_width=True
+    )
 
     # Add the same engineered features used during training
     input_df = add_engineered_features(input_df)
