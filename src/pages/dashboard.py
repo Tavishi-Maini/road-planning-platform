@@ -20,6 +20,11 @@ def parse_prediction_data(row):
     except Exception:
         return {}
 
+def fig_to_png_bytes(fig):
+    try:
+        return fig.to_image(format="png", scale=2)
+    except Exception:
+        return None
 
 def render_dashboard():
     page_header(
@@ -415,34 +420,39 @@ def render_dashboard():
     else:
         st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
     
-    st.download_button(
-        label="📥 Download Cost per km Chart PNG",
-        data=fig_to_png_bytes(cost_per_km_fig),
-        file_name="cost_per_km_analytics.png",
-        mime="image/png",
-        width="stretch",
-    )
-    st.download_button(
-        label="📥 Download Duration Chart PNG",
-        data=fig_to_png_bytes(duration_fig),
-        file_name="duration_analytics.png",
-        mime="image/png",
-        width="stretch",
-    )
-    st.download_button(
-        label="📥 Download Status Distribution PNG",
-        data=fig_to_png_bytes(status_fig),
-        file_name="project_status_distribution.png",
-        mime="image/png",
-        width="stretch",
-    )
-    
-    
-def fig_to_png_bytes(fig):
-    try:
-        return fig.to_image(format="png", scale=2)
-    except Exception:
-        return None
+    png_bytes = fig_to_png_bytes(cost_per_km_fig)
+
+    if png_bytes is not None:
+        st.download_button(
+            label="📥 Download Cost per km Chart PNG",
+            data=png_bytes,
+            file_name="cost_per_km_analytics.png",
+            mime="image/png"
+        )
+    else:
+        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
+
+    png_bytes = fig_to_png_bytes(duration_fig)
+    if png_bytes is not None:
+        st.download_button(
+            label="📥 Download Duration Chart PNG",
+            data=png_bytes,
+            file_name="duration_analytics.png",
+            mime="image/png"
+        )
+    else:
+        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
+
+    png_bytes = fig_to_png_bytes(status_fig)
+    if png_bytes is not None:
+        st.download_button(
+            label="📥 Download Status Distribution PNG",
+            data=png_bytes,
+            file_name="project_status_distribution.png",
+            mime="image/png"
+        )
+    else:
+        st.info("PNG download is unavailable on Streamlit Cloud. Chart is still visible.")
 
 
 def create_dashboard_summary_png(
