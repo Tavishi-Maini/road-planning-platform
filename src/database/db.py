@@ -20,6 +20,7 @@ def init_database():
             project_name TEXT NOT NULL,
             location TEXT NOT NULL,
             road_category TEXT,
+            project_type TEXT,
             terrain_type TEXT,
             road_length_km REAL,
             number_of_lanes INTEGER,

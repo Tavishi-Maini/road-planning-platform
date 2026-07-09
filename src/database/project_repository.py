@@ -31,6 +31,7 @@ def save_project(project_data):
             project_name,
             location,
             road_category,
+            project_type,
             terrain_type,
             road_length_km,
             number_of_lanes,
@@ -41,12 +42,13 @@ def save_project(project_data):
             prediction_status,
             project_data
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             project_data["project_name"],
             project_data["location"],
             project_data["road_category"],
+            project_data["project_type"],
             project_data["terrain_type"],
             project_data["road_length_km"],
             project_data["number_of_lanes"],

@@ -74,6 +74,10 @@ def render_new_project():
                 "Road Category *",
                 ["National Highway", "State Highway", "Urban Road", "Rural Road", "Expressway"]
             )
+            project_type = st.selectbox(
+                "Project Type *",
+                ["New Construction", "Road Upgrade", "Rehabilitation", "Widening", "Elevated Corridor", "Expressway", "Bypass"]
+            )
 
         with col2:
             project_owner = st.text_input("Project Owner / Authority")
@@ -323,6 +327,7 @@ def render_new_project():
             "location": location,
             "project_owner": project_owner,
             "road_category": road_category,
+            "project_type": project_type,
             "terrain_type": terrain_type,
             "project_stage": project_stage,
             "road_length_km": road_length,

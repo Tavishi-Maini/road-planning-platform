@@ -194,6 +194,7 @@ def prepare_features(project_data):
     risk = project_data.get("risk_level", "Medium")
     rainfall_zone = project_data.get("rainfall_zone", "Moderate")
     road_category = project_data.get("road_category", "National Highway")
+    project_type = project_data.get("project_type", "New Construction")
 
     terrain_map = {
         "Plain": 0,
@@ -316,7 +317,18 @@ def prepare_features(project_data):
         3: 1.2,
     }[terrain_class]
 
-    base_cost = road_category_base_cost.get(road_category, 850)
+    project_type_multiplier = {
+        "New Construction": 1.00,
+        "Road Upgrade": 0.55,
+        "Rehabilitation": 0.45,
+        "Widening": 0.75,
+        "Elevated Corridor": 2.80,
+        "Expressway": 1.80,
+        "Bypass": 1.20,
+    }
+
+    base_cost = road_category_base_cost.get(road_category, 280)
+    base_cost *= project_type_multiplier.get(project_type, 1.0)
     base_cost *= 1 + terrain_class * 0.25
     base_cost *= 1 + risk_map.get(risk, 1) * 0.08
 
@@ -533,24 +545,24 @@ def prepare_features_encoded(project_data):
 def run_prediction(project_data):
     input_df = prepare_features(project_data)
     
-    st.subheader("🔍 Model Input Debug")
+    # st.subheader("🔍 Model Input Debug")
 
-    debug_columns = [
-        "bitumen_price_index",
-        "cement_price_index",
-        "steel_price_index",
-        "diesel_price_index",
-        "material_transport_stress",
-        "economic_price_index",
-        "regional_cost_index",
-    ]
+    # debug_columns = [
+    #     "bitumen_price_index",
+    #     "cement_price_index",
+    #     "steel_price_index",
+    #     "diesel_price_index",
+    #     "material_transport_stress",
+    #     "economic_price_index",
+    #     "regional_cost_index",
+    # ]
 
-    available = [c for c in debug_columns if c in input_df.columns]
+    # available = [c for c in debug_columns if c in input_df.columns]
 
-    st.dataframe(
-        input_df[available].T.rename(columns={0: "Value"}),
-        use_container_width=True
-    )
+    # st.dataframe(
+    #     input_df[available].T.rename(columns={0: "Value"}),
+    #     use_container_width=True
+    # )
 
     # Add the same engineered features used during training
     input_df = add_engineered_features(input_df)
