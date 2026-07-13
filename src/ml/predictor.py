@@ -634,21 +634,24 @@ def run_prediction(project_data):
         and project_type == "Road Upgrade"
     ):
         predictions["total_cost"] = length_km * 180.0
-
         predictions["duration"] = max(
             12.0,
             length_km * 1.2,
         )
-
         predictions["manpower_hours_per_km"] = min(
             predictions["manpower_hours_per_km"],
             5900.0,
         )
-
         predictions["machinery_hours_per_km"] = min(
             predictions["machinery_hours_per_km"],
             4400.0,
         )
+    elif (
+        road_category == "National Highway"
+        and project_type == "Widening"
+    ):
+        predictions["total_cost"] *= 1.30
+        predictions["duration"] *= 1.20
 
     # Final prediction guards
     predictions["total_cost"] = float(

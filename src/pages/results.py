@@ -126,6 +126,22 @@ def generate_recommendations(project_data, prediction_data):
 
     return recommendations
 
+def safe_float(value, default=0.0):
+    if value is None:
+        return default
+
+    try:
+        if pd.isna(value):
+            return default
+    except TypeError:
+        pass
+    
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def build_project_timeline(duration):
     phases = [
         ("Planning & Mobilization", 0.00, 0.10),
@@ -175,27 +191,87 @@ def render_results():
         for row in completed_projects.itertuples()
     }
 
+    project_labels = list(project_options.keys())
+    requested_project_id = st.session_state.get(
+        "selected_result_project_id"
+    )
+    default_index = 0
+    if requested_project_id is not None:
+        for index, label in enumerate(project_labels):
+            if project_options[label] == requested_project_id:
+                default_index = index
+                break
+
     selected_project_label = st.selectbox(
         "Select project result",
-        list(project_options.keys())
+        project_labels,
+        index=default_index,
+        key="results_project_selector",
     )
 
     selected_project_id = project_options[selected_project_label]
+    st.session_state.selected_result_project_id = selected_project_id
     project_data = get_project_by_id(selected_project_id)
 
     selected_row = completed_projects[
         completed_projects["id"] == selected_project_id
     ].iloc[0]
 
+    required_prediction_columns = [
+        "total_cost_lakhs",
+        "construction_duration_months",
+        "material_index",
+        "manpower_hours_per_km",
+        "machinery_hours_per_km",
+    ]
+
+    missing_prediction_fields = [
+        column
+        for column in required_prediction_columns
+        if column not in selected_row.index
+        or selected_row.get(column) is None
+        or pd.isna(selected_row.get(column))
+    ]
+
+    if missing_prediction_fields:
+        st.warning(
+            "This project does not have a complete saved prediction. "
+            "Run the prediction again from the Prediction page."
+        )
+        st.write("Missing fields:", missing_prediction_fields)
+        return
+
     try:
+        total_cost = safe_float(
+            selected_row.get("total_cost_lakhs")
+        )
+        duration = safe_float(
+            selected_row.get("construction_duration_months")
+        )
+        material_index = safe_float(
+            selected_row.get("material_index")
+        )
+        manpower = safe_float(
+            selected_row.get("manpower_hours_per_km")
+        )
+        machinery = safe_float(
+            selected_row.get("machinery_hours_per_km")
+        )
+
+    # Compatibility dictionary used by confidence and recommendations
         prediction_data = {
-            "total_cost": selected_row["total_cost_lakhs"],
-            "duration": selected_row["construction_duration_months"],
-            "material_index": selected_row["material_index"],
-            "manpower_hours_per_km": selected_row["manpower_hours_per_km"],
-            "machinery_hours_per_km": selected_row["machinery_hours_per_km"],
+            "total_cost": total_cost,
+            "duration": duration,
+            "material_index": material_index,
+            "manpower_hours_per_km": manpower,
+            "machinery_hours_per_km": machinery,
         }
-        confidence = calculate_prediction_confidence(prediction_data, project_data)
+
+        confidence = calculate_prediction_confidence(
+            prediction_data,
+            project_data,
+        )
+
     except Exception as e:
         friendly_error_box(
             "Prediction results could not be loaded.",
@@ -208,11 +284,6 @@ def render_results():
         )
         return
 
-    total_cost = prediction_data["total_cost"]
-    duration = prediction_data["duration"]
-    material_index = prediction_data["material_index"]
-    manpower = prediction_data["manpower_hours_per_km"]
-    machinery = prediction_data["machinery_hours_per_km"]
 
     st.success("Prediction completed and available for planning review.")
 
@@ -350,63 +421,60 @@ def render_results():
 
     st.dataframe(summary_df, width="stretch", hide_index=True)
 
-    st.markdown("## Prediction History")
-    history_df = get_all_projects(selected_project_id)
+    st.markdown("## Saved Prediction Record")
+
+    history_df = completed_projects[
+        completed_projects["id"] == selected_project_id
+    ].copy()
+
     if history_df.empty:
-        st.info("No previous prediction history available for this project.")
+        st.info("No saved prediction record is available for this project.")
     else:
         history_rows = []
-        for index, row in history_df.iterrows():
-            pred = row["prediction_data"]
-            history_rows.append({
-                "Run": f"Prediction {len(history_df) - index}",
-                "Timestamp": row["created_at"],
-                "Total Cost": format_cost_lakhs_as_cr(pred.get("total_cost", 0)),
-                "Duration": f"{pred.get('duration', 0):.2f} months",
-                "Material Index": f"{pred.get('material_index', 0):.2f}",
-                "Manpower/km": f"{pred.get('manpower_hours_per_km', 0):.2f}",
-                "Machinery/km": f"{pred.get('machinery_hours_per_km', 0):.2f}",
-            })
-        history_display_df = pd.DataFrame(history_rows)
-        st.dataframe(
-            history_display_df,
-            width="stretch",
-            hide_index=True
-        )
-    if not history_df.empty and len(history_df) > 1:
-        trend_rows = []
-        for _, row in history_df.iterrows():
-            pred = row["prediction_data"]
 
-            trend_rows.append({
-                "Timestamp": row["created_at"],
-                "Total Cost (Cr)": pred.get("total_cost", 0) / 100,
-                "Duration": pred.get("duration", 0),
+        for run_number, (_, row) in enumerate(
+            history_df.sort_values(
+                "created_at",
+                ascending=False,
+            ).iterrows(),
+            start=1,
+        ):
+            row_total_cost = safe_float(
+                row.get("total_cost_lakhs")
+            )
+            row_duration = safe_float(
+                row.get("construction_duration_months")
+            )
+            row_material = safe_float(
+                row.get("material_index")
+            )
+            row_manpower = safe_float(
+                row.get("manpower_hours_per_km")
+            )
+            row_machinery = safe_float(
+                row.get("machinery_hours_per_km")
+            )
+            history_rows.append({
+                "Run": f"Prediction {run_number}",
+                "Timestamp": row.get("created_at", ""),
+                "Total Cost": format_cost_lakhs_as_cr(
+                    row_total_cost
+                ),
+                "Duration": f"{row_duration:.2f} months",
+                "Material Index": f"{row_material:.2f}",
+                "Manpower/km": f"{row_manpower:.2f}",
+                "Machinery/km": f"{row_machinery:.2f}",
             })
-        trend_df = pd.DataFrame(trend_rows)
-        trend_fig = px.line(
-            trend_df.sort_values("Timestamp"),
-            x="Timestamp",
-            y=["Total Cost (Cr)", "Duration"],
-            markers=True,
-            title="Prediction History Trend"
-        )
-        trend_fig.update_layout(
-            height=420,
-            title_x=0.02,
-            xaxis_title="Prediction Run",
-            yaxis_title="Value"
-        )    
-        st.plotly_chart(
-            trend_fig,
-            width="stretch",
-            key=f"prediction_history_trend_{selected_project_id}"
-        )
+            history_display_df = pd.DataFrame(history_rows)
+            st.dataframe(
+                history_display_df,
+                width="stretch",
+                hide_index=True,
+            )
 
     st.markdown("## Cost Summary")
-
-    road_length = project_data["road_length_km"]
-    cost_per_km = total_cost / road_length if road_length else 0
+    road_length = safe_float(project_data.get("road_length_km", 0))
+    cost_per_km = total_cost / road_length if road_length > 0 else 0.0
 
     c1, c2, c3 = st.columns(3)
 
@@ -421,8 +489,8 @@ def render_results():
 
     st.markdown("## Cost Breakdown Chart")
 
-    contingency_pct = project_data.get("contingency_pct", 0)
-    escalation_pct = project_data.get("escalation_pct", 0)
+    contingency_pct = safe_float(project_data.get("contingency_pct"))
+    escalation_pct = safe_float(project_data.get("escalation_pct"))
 
     contingency_cost = total_cost * contingency_pct / 100
     escalation_cost = total_cost * escalation_pct / 100
@@ -693,50 +761,6 @@ def render_results():
         top_3 = top_features.head(3)
 
         for _, row in top_3.iterrows():
-            st.markdown(
-                f"""
-                <div class="section-card">
-                    <h4>{row['feature']}</h4>
-                    <p>
-                    Importance score: <b>{row['importance']:.4f}</b>
-                    </p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-    selected_importance = importance_dict[selected_target]
-
-    if selected_importance.empty:
-        st.warning(
-            "Feature importance is unavailable for this model configuration."
-            "If the final estimator supports feature_importances_, check the saved pipeline structure."
-        )
-    else:
-        top_features = selected_importance.head(10)
-
-        importance_fig = px.bar(
-            top_features.sort_values("importance", ascending=True),
-            x="importance",
-            y="feature",
-            orientation="h",
-            title="Top Feature Importance Factors"
-        )
-
-        importance_fig.update_layout(
-            height=500,
-            xaxis_title="Importance Score",
-            yaxis_title="Feature",
-            title_x=0.02
-        )
-
-        st.plotly_chart(importance_fig, width="stretch")
-
-        st.markdown("### Top Driving Factors")
-
-        top_3 = top_features.head(3)
-
-        for index, row in top_3.iterrows():
             st.markdown(
                 f"""
                 <div class="section-card">

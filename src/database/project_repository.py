@@ -94,26 +94,26 @@ def project_exists(project_name: str, location: str) -> bool:
     return bool(response.data)
 
 
-def update_project_prediction(
-    project_id: int,
-    predictions: dict[str, float],
-) -> None:
+def update_project_prediction(project_id: int, predictions: dict) -> None:
     client = get_supabase_client()
 
     payload = {
         "total_cost_lakhs": predictions.get("total_cost"),
-        "construction_duration_months": predictions.get(
-            "construction_duration_months"
-        ),
+        "construction_duration_months": predictions.get("duration"),
         "material_index": predictions.get("material_index"),
-        "manpower_hours_per_km": predictions.get(
-            "manpower_hours_per_km"
-        ),
-        "machinery_hours_per_km": predictions.get(
-            "machinery_hours_per_km"
-        ),
+        "manpower_hours_per_km": predictions.get("manpower_hours_per_km"),
+        "machinery_hours_per_km": predictions.get("machinery_hours_per_km"),
         "prediction_status": "Completed",
     }
+
+    print("Predictions received:", predictions)
+    print("Payload being saved:", payload)
+
+    if payload["construction_duration_months"] is None:
+        raise ValueError(
+            "Duration is missing from predictions. "
+            f"Available keys: {list(predictions.keys())}"
+        )
 
     response = (
         client.table(TABLE_NAME)
@@ -122,11 +122,11 @@ def update_project_prediction(
         .execute()
     )
 
-    if response.data is None:
+    if not response.data:
         raise RuntimeError(
-            f"Failed to update prediction for project {project_id}."
+            f"Failed to update prediction for project ID {project_id}."
         )
-
+        
 
 def delete_project(project_id: int) -> None:
     client = get_supabase_client()

@@ -13,7 +13,17 @@ from src.database.project_repository import (
 )
 from src.ml.predictor import run_prediction, validate_project_features
 
-
+def go_to_results(project_id):
+    st.session_state.selected_result_project_id = project_id
+    # Remove the old sidebar radio value ("Prediction")
+    if "sidebar_navigation" in st.session_state:
+        del st.session_state["sidebar_navigation"]
+    st.rerun()
+    
+def go_to_results(project_id):
+    st.session_state.selected_result_project_id = project_id
+    st.session_state.navigation_page = "Results Dashboard"
+    
 def render_prediction():
     page_header(
         "Prediction",
@@ -97,6 +107,23 @@ def render_prediction():
             update_project_prediction(selected_project_id, predictions)
 
             st.success("Prediction completed successfully.")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.button(
+                    "✓ Prediction Completed",
+                    disabled=True,
+                    width="stretch",
+                )
+            with col2:
+                st.button(
+                    "View Results Dashboard →",
+                    type="primary",
+                    width="stretch",
+                    key=f"view_results_{selected_project_id}",
+                    on_click=go_to_results,
+                    args=(selected_project_id,)
+                )
 
             st.markdown("## Prediction Output")
 

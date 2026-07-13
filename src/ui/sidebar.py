@@ -1,35 +1,38 @@
 import streamlit as st
 
 
-def render_sidebar():
-    pages = [
-        "Dashboard",
-        "New Project",
-        "Prediction",
-        "Results Dashboard",
-        "Compare Projects",
-        "Reports",
-        "Settings",
-    ]
+PAGES = [
+    "Dashboard",
+    "New Project",
+    "Prediction",
+    "Results Dashboard",
+    "Compare Projects",
+    "Reports",
+    "Settings",
+]
 
-    if "active_page" not in st.session_state:
-        st.session_state.active_page = "Dashboard"
+
+def render_sidebar():
+    if "navigation_page" not in st.session_state:
+        st.session_state.navigation_page = "Dashboard"
+
+    if st.session_state.navigation_page not in PAGES:
+        st.session_state.navigation_page = "Dashboard"
 
     with st.sidebar:
         st.markdown("## 🛣️ RoadPlan AI")
         st.caption("Infrastructure Planning Intelligence")
+
         st.markdown("---")
 
-        page = st.radio(
+        st.radio(
             "Navigation",
-            pages,
-            index=pages.index(st.session_state.active_page),
+            PAGES,
+            key="navigation_page",
             label_visibility="collapsed",
         )
-
-        st.session_state.active_page = page
 
         st.markdown("---")
         st.caption("Prototype v1.0")
 
-    return st.session_state.active_page
+    return st.session_state.navigation_page
