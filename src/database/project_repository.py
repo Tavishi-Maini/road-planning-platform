@@ -121,12 +121,26 @@ def update_project_prediction(project_id: int, predictions: dict) -> None:
         .eq("id", project_id)
         .execute()
     )
+    #print("Supabase update response:", response.data)
 
     if not response.data:
         raise RuntimeError(
             f"Failed to update prediction for project ID {project_id}."
         )
         
+    verification = (
+        client.table(TABLE_NAME)
+        .select(
+            "id, total_cost_lakhs, construction_duration_months, "
+            "material_index, manpower_hours_per_km, "
+            "machinery_hours_per_km, prediction_status"
+        )
+        .eq("id", project_id)
+        .single()
+        .execute()
+    )
+
+    # print("Verified database row:", verification.data)
 
 def delete_project(project_id: int) -> None:
     client = get_supabase_client()

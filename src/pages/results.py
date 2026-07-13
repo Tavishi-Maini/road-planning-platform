@@ -216,6 +216,19 @@ def render_results():
     selected_row = completed_projects[
         completed_projects["id"] == selected_project_id
     ].iloc[0]
+    # print(
+    #     "Results selected row:",
+    #     selected_row[
+    #         [
+    #             "id",
+    #             "total_cost_lakhs",
+    #             "construction_duration_months",
+    #             "material_index",
+    #             "manpower_hours_per_km",
+    #             "machinery_hours_per_km",
+    #         ]
+    #     ].to_dict()
+    # )
 
     required_prediction_columns = [
         "total_cost_lakhs",
