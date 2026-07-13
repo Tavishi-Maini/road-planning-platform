@@ -338,7 +338,6 @@ def prepare_features(project_data):
     machinery_avail = float(project_data.get("machinery_availability_pct", 85))
     skilled_labour = float(project_data.get("skilled_labour_pct", 40))
 
-    utility_yes = project_data.get("utility_shifting_required", "No") == "Yes"
     stabilization_yes = project_data.get("soil_stabilization_required", "No") == "Yes"
 
     avg_rainfall = rainfall_map.get(rainfall_zone, 1300)
@@ -612,55 +611,91 @@ def run_prediction(project_data):
     models = load_models()
     predictions = {}
 
+    # ---------------------------------------------------------
+    # Model predictions
+    # ---------------------------------------------------------
     for target_name, model in models.items():
-        prediction = model.predict(input_df)[0]
-        prediction = float(prediction)
-
-        if target_name == "material_index":
-            prediction = np.clip(prediction, 123.0, 150.0)
-
+        prediction = float(model.predict(input_df)[0])
         predictions[target_name] = prediction
 
     # ---------------------------------------------------------
-    # Business Rule Overrides
+    # Project-specific business rules
     # ---------------------------------------------------------
+    project_type = str(
+        project_data.get("project_type", "")
+    ).strip()
 
-    project_type = project_data.get("project_type", "")
-    road_category = project_data.get("road_category", "")
-    length_km = float(project_data.get("road_length_km", 0))
+    road_category = str(
+        project_data.get("road_category", "")
+    ).strip()
 
-    if road_category == "Rural Road" and project_type == "Road Upgrade":
-        predictions["total_cost"] = length_km * 180  # lakhs
-        predictions["duration"] = max(12, length_km * 1.2)
+    length_km = float(
+        project_data.get("road_length_km", 0) or 0
+    )
+
+    # The training dataset contained no comparable rural-upgrade rows,
+    # so use a controlled engineering rule for this unsupported segment.
+    if (
+        road_category == "Rural Road"
+        and project_type == "Road Upgrade"
+    ):
+        predictions["total_cost_lakhs"] = length_km * 180.0
+
+        predictions["construction_duration_months"] = max(
+            12.0,
+            length_km * 1.2,
+        )
+
         predictions["manpower_hours_per_km"] = min(
-            predictions["manpower_hours_per_km"], 5900
+            predictions["manpower_hours_per_km"],
+            5900.0,
         )
+
         predictions["machinery_hours_per_km"] = min(
-            predictions["machinery_hours_per_km"], 4400
+            predictions["machinery_hours_per_km"],
+            4400.0,
         )
 
     # ---------------------------------------------------------
-    # Final Prediction Guard
+    # Final prediction guards
     # ---------------------------------------------------------
-
-    predictions["material_index"] = float(
-        np.clip(predictions["material_index"], 123.0, 150.0)
-    )
-
-    predictions["machinery_hours_per_km"] = float(
-        np.clip(predictions["machinery_hours_per_km"], 3500.0, 6500.0)
-    )
-
-    predictions["manpower_hours_per_km"] = float(
-        np.clip(predictions["manpower_hours_per_km"], 5000.0, 8000.0)
+    predictions["total_cost_lakhs"] = float(
+        max(
+            predictions["total_cost_lakhs"],
+            1000.0,
+        )
     )
 
     predictions["construction_duration_months"] = float(
-        np.clip(predictions["construction_duration_months"], 12.0, 220.0)
+        np.clip(
+            predictions["construction_duration_months"],
+            12.0,
+            220.0,
+        )
     )
 
-    predictions["total_cost_lakhs"] = float(
-        max(predictions["total_cost_lakhs"], 1000.0)
+    predictions["material_index"] = float(
+        np.clip(
+            predictions["material_index"],
+            123.0,
+            150.0,
+        )
+    )
+
+    predictions["manpower_hours_per_km"] = float(
+        np.clip(
+            predictions["manpower_hours_per_km"],
+            5000.0,
+            8000.0,
+        )
+    )
+
+    predictions["machinery_hours_per_km"] = float(
+        np.clip(
+            predictions["machinery_hours_per_km"],
+            3500.0,
+            6500.0,
+        )
     )
 
     return {

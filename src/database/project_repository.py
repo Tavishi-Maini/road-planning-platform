@@ -1,263 +1,191 @@
-import json
+from typing import Any
+
 import pandas as pd
 
-from src.database.db import get_connection
+from src.database.supabase_client import get_supabase_client
 
-def project_exists(project_name, location):
-    conn = get_connection()
-    cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        SELECT COUNT(*)
-        FROM projects
-        WHERE project_name = ? AND location = ?
-        """,
-        (project_name, location),
-    )
+TABLE_NAME = "projects"
 
-    count = cursor.fetchone()[0]
-    conn.close()
+def get_prediction_history():
+    """
+    Returns all projects that have completed predictions,
+    ordered by newest first.
+    """
+    projects = get_all_projects()
 
-    return count > 0
+    if projects.empty:
+        return pd.DataFrame()
 
-def save_project(project_data):
-    conn = get_connection()
-    cursor = conn.cursor()
+    if "prediction_status" in projects.columns:
+        projects = projects[
+            projects["prediction_status"] == "Completed"
+        ]
 
-    cursor.execute(
-        """
-        INSERT INTO projects (
-            project_name,
-            location,
-            road_category,
-            project_type,
-            terrain_type,
-            road_length_km,
-            number_of_lanes,
-            design_speed_kmph,
-            aadt,
-            subgrade_cbr_pct,
-            risk_level,
-            prediction_status,
-            project_data
+    if "created_at" in projects.columns:
+        projects = projects.sort_values(
+            by="created_at",
+            ascending=False,
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            project_data["project_name"],
-            project_data["location"],
-            project_data["road_category"],
-            project_data.get("project_type", "New Construction"),
-            project_data["terrain_type"],
-            project_data["road_length_km"],
-            project_data["number_of_lanes"],
-            project_data["design_speed_kmph"],
-            project_data["aadt"],
-            project_data["subgrade_cbr_pct"],
-            project_data["risk_level"],
-            project_data.get("prediction_status", "Pending"),
-            json.dumps(project_data),
-        ),
+
+    return projects
+
+def save_project(project_data: dict[str, Any]) -> int:
+    client = get_supabase_client()
+
+    payload = project_data.copy()
+    payload.setdefault("project_type", "New Construction")
+    payload.setdefault("prediction_status", "Pending")
+
+    response = (
+        client.table(TABLE_NAME)
+        .insert(payload)
+        .execute()
     )
 
-    conn.commit()
-    conn.close()
+    if not response.data:
+        raise RuntimeError("Supabase did not return the inserted project.")
+
+    return int(response.data[0]["id"])
 
 
-def get_all_projects():
-    conn = get_connection()
+def get_all_projects() -> pd.DataFrame:
+    client = get_supabase_client()
 
-    df = pd.read_sql_query(
-        """
-        SELECT
-            id,
-            project_name,
-            location,
-            road_category,
-            terrain_type,
-            road_length_km,
-            number_of_lanes,
-            design_speed_kmph,
-            aadt,
-            subgrade_cbr_pct,
-            risk_level,
-            prediction_status,
-            created_at,
-            prediction_data
-        FROM projects
-        ORDER BY created_at DESC
-        """,
-        conn,
+    response = (
+        client.table(TABLE_NAME)
+        .select("*")
+        .order("created_at", desc=True)
+        .execute()
     )
 
-    conn.close()
-    return df
+    return pd.DataFrame(response.data or [])
 
 
-def get_project_by_id(project_id):
-    conn = get_connection()
-    cursor = conn.cursor()
+def get_project_by_id(project_id: int) -> dict[str, Any] | None:
+    client = get_supabase_client()
 
-    cursor.execute(
-        "SELECT project_data FROM projects WHERE id = ?",
-        (project_id,),
+    response = (
+        client.table(TABLE_NAME)
+        .select("*")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
     )
 
-    row = cursor.fetchone()
-    conn.close()
-
-    if row is None:
+    if not response.data:
         return None
 
-    return json.loads(row[0])
+    return response.data[0]
 
 
-def delete_project(project_id):
-    conn = get_connection()
-    cursor = conn.cursor()
+def project_exists(project_name: str, location: str) -> bool:
+    client = get_supabase_client()
 
-    cursor.execute(
-        "DELETE FROM projects WHERE id = ?",
-        (project_id,),
+    response = (
+        client.table(TABLE_NAME)
+        .select("id")
+        .eq("project_name", project_name)
+        .eq("location", location)
+        .limit(1)
+        .execute()
     )
 
-    conn.commit()
-    conn.close()
+    return bool(response.data)
 
 
-def update_project(project_id, project_data):
-    conn = get_connection()
-    cursor = conn.cursor()
+def update_project_prediction(
+    project_id: int,
+    predictions: dict[str, float],
+) -> None:
+    client = get_supabase_client()
 
-    cursor.execute(
-        """
-        UPDATE projects
-        SET
-            project_name = ?,
-            location = ?,
-            road_category = ?,
-            terrain_type = ?,
-            road_length_km = ?,
-            number_of_lanes = ?,
-            design_speed_kmph = ?,
-            aadt = ?,
-            subgrade_cbr_pct = ?,
-            risk_level = ?,
-            prediction_status = ?,
-            project_data = ?
-        WHERE id = ?
-        """,
-        (
-            project_data["project_name"],
-            project_data["location"],
-            project_data["road_category"],
-            project_data["terrain_type"],
-            project_data["road_length_km"],
-            project_data["number_of_lanes"],
-            project_data["design_speed_kmph"],
-            project_data["aadt"],
-            project_data["subgrade_cbr_pct"],
-            project_data["risk_level"],
-            project_data.get("prediction_status", "Pending"),
-            json.dumps(project_data),
-            project_id,
+    payload = {
+        "total_cost": predictions.get("total_cost"),
+        "construction_duration_months": predictions.get(
+            "construction_duration_months"
         ),
-    )
-
-    conn.commit()
-    conn.close()
-    
-
-def update_project_prediction(project_id, prediction_data):
-    import json
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        UPDATE projects
-        SET prediction_status = ?, prediction_data = ?
-        WHERE id = ?
-        """,
-        (
-            "Completed",
-            json.dumps(prediction_data),
-            project_id,
+        "material_index": predictions.get("material_index"),
+        "manpower_hours_per_km": predictions.get(
+            "manpower_hours_per_km"
         ),
-    )
-    
-    conn.commit()
-    conn.close()
-    save_prediction_history(project_id, prediction_data)
-    
-def delete_duplicate_projects():
-    conn = get_connection()
-    cursor = conn.cursor()
+        "machinery_hours_per_km": predictions.get(
+            "machinery_hours_per_km"
+        ),
+        "prediction_status": "Completed",
+    }
 
-    cursor.execute("""
-        DELETE FROM projects
-        WHERE id NOT IN (
-            SELECT MIN(id)
-            FROM projects
-            GROUP BY project_name, location
+    response = (
+        client.table(TABLE_NAME)
+        .update(payload)
+        .eq("id", project_id)
+        .execute()
+    )
+
+    if response.data is None:
+        raise RuntimeError(
+            f"Failed to update prediction for project {project_id}."
         )
-    """)
 
-    conn.commit()
-    conn.close()
-    
-def save_prediction_history(project_id, prediction_data):
-    import json
 
-    conn = get_connection()
-    cursor = conn.cursor()
+def delete_project(project_id: int) -> None:
+    client = get_supabase_client()
 
-    cursor.execute(
-        """
-        INSERT INTO prediction_history (
-            project_id,
-            prediction_data
+    response = (
+        client.table(TABLE_NAME)
+        .delete()
+        .eq("id", project_id)
+        .execute()
+    )
+
+    if response.data is None:
+        raise RuntimeError(
+            f"Failed to delete project {project_id}."
         )
-        VALUES (?, ?)
-        """,
-        (
-            project_id,
-            json.dumps(prediction_data),
-        ),
+        
+def delete_duplicate_projects() -> int:
+    """
+    Deletes duplicate projects that have the same project_name and location.
+
+    Keeps the newest record and removes older duplicates.
+    Returns the number of deleted rows.
+    """
+    client = get_supabase_client()
+
+    response = (
+        client.table(TABLE_NAME)
+        .select("id, project_name, location, created_at")
+        .order("created_at", desc=True)
+        .execute()
     )
 
-    conn.commit()
-    conn.close()
+    rows = response.data or []
 
+    seen = set()
+    duplicate_ids = []
 
-def get_prediction_history(project_id):
-    import json
-    import pandas as pd
+    for row in rows:
+        key = (
+            str(row.get("project_name", "")).strip().lower(),
+            str(row.get("location", "")).strip().lower(),
+        )
 
-    conn = get_connection()
+        if key in seen:
+            duplicate_ids.append(row["id"])
+        else:
+            seen.add(key)
 
-    df = pd.read_sql_query(
-        """
-        SELECT
-            id,
-            project_id,
-            prediction_data,
-            created_at
-        FROM prediction_history
-        WHERE project_id = ?
-        ORDER BY created_at DESC
-        """,
-        conn,
-        params=(project_id,),
-    )
+    deleted_count = 0
 
-    conn.close()
+    for project_id in duplicate_ids:
+        delete_response = (
+            client.table(TABLE_NAME)
+            .delete()
+            .eq("id", project_id)
+            .execute()
+        )
 
-    if df.empty:
-        return df
+        if delete_response.data is not None:
+            deleted_count += 1
 
-    df["prediction_data"] = df["prediction_data"].apply(json.loads)
-
-    return df
+    return deleted_count

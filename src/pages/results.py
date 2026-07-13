@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from src.ui.components import page_header, metric_card, friendly_error_box
-from src.database.project_repository import get_all_projects, get_project_by_id, get_prediction_history
+from src.database.project_repository import get_all_projects, get_project_by_id
 from src.ml.feature_importance import (get_model_feature_importance, get_combined_feature_importance)
 from src.ml.confidence import calculate_prediction_confidence
 from src.config.app_settings import load_settings
@@ -346,7 +346,7 @@ def render_results():
     st.dataframe(summary_df, width="stretch", hide_index=True)
 
     st.markdown("## Prediction History")
-    history_df = get_prediction_history(selected_project_id)
+    history_df = get_all_projects(selected_project_id)
     if history_df.empty:
         st.info("No previous prediction history available for this project.")
     else:
