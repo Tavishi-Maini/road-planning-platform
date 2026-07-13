@@ -1,5 +1,7 @@
 import joblib
+import streamlit as st
 from pathlib import Path
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 MODEL_DIR = BASE_DIR / "models"
@@ -13,12 +15,15 @@ MODEL_PATHS = {
 }
 
 
+@st.cache_resource(show_spinner=False)
 def load_models():
     models = {}
 
     for target_name, model_path in MODEL_PATHS.items():
         if not model_path.exists():
-            raise FileNotFoundError(f"Model file not found: {model_path}")
+            raise FileNotFoundError(
+                f"Model file not found: {model_path}"
+            )
 
         models[target_name] = joblib.load(model_path)
 
