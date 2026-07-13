@@ -406,6 +406,15 @@ def render_dashboard():
         cost_fig,
         width="stretch",
         key="dashboard_total_cost_chart",
+        config={
+            "displaylogo": False,
+            "modeBarButtonsToAdd": ["toImage"],
+            "toImageButtonOptions": {
+                "format": "png",
+                "filename": "roadplan_total_cost",
+                "scale": 2,
+            },
+        },
     )
 
     st.markdown("## Cost per km Analytics")
@@ -435,6 +444,15 @@ def render_dashboard():
         cost_per_km_fig,
         width="stretch",
         key="dashboard_cost_per_km_chart",
+        config={
+            "displaylogo": False,
+            "modeBarButtonsToAdd": ["toImage"],
+            "toImageButtonOptions": {
+                "format": "png",
+                "filename": "roadplan_cost_per_km",
+                "scale": 2,
+            },
+        },
     )
 
     st.markdown("## Duration Analytics")
@@ -464,6 +482,15 @@ def render_dashboard():
         duration_fig,
         width="stretch",
         key="dashboard_duration_chart",
+        config={
+            "displaylogo": False,
+            "modeBarButtonsToAdd": ["toImage"],
+            "toImageButtonOptions": {
+                "format": "png",
+                "filename": "roadplan_duration",
+                "scale": 2,
+            },
+        },
     )
 
     st.markdown("## Project Status Distribution")
@@ -487,6 +514,15 @@ def render_dashboard():
         status_fig,
         width="stretch",
         key="dashboard_status_distribution_chart",
+        config={
+            "displaylogo": False,
+            "modeBarButtonsToAdd": ["toImage"],
+            "toImageButtonOptions": {
+                "format": "png",
+                "filename": "roadplan_status_distribution",
+                "scale": 2,
+            },
+        },
     )
 
     st.markdown("## Export Dashboard")
