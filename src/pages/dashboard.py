@@ -143,6 +143,12 @@ def create_dashboard_summary_png(
     buffer.seek(0)
     return buffer
 
+def fig_to_html_bytes(fig):
+    html = fig.to_html(
+        full_html=True,
+        include_plotlyjs="cdn",
+    )
+    return html.encode("utf-8")
 
 def render_dashboard():
     page_header(
