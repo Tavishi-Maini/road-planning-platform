@@ -53,7 +53,13 @@ def render_comparison():
             completed_projects["id"] == project_id
         ].iloc[0]
 
-        prediction_data = json.loads(selected_row["prediction_data"])
+        prediction_data = {
+            "total_cost": selected_row["total_cost_lakhs"],
+            "duration": selected_row["construction_duration_months"],
+            "material_index": selected_row["material_index"],
+            "manpower_hours_per_km": selected_row["manpower_hours_per_km"],
+            "machinery_hours_per_km": selected_row["machinery_hours_per_km"],
+        }
 
         road_length = project_data.get("road_length_km", 0)
         total_cost = prediction_data.get("total_cost", 0)

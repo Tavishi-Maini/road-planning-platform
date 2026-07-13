@@ -45,7 +45,13 @@ def render_reports():
     ].iloc[0]
 
     project_data = get_project_by_id(selected_project_id)
-    prediction_data = json.loads(selected_row["prediction_data"])
+    prediction_data = {
+        "total_cost": selected_row["total_cost_lakhs"],
+        "duration": selected_row["construction_duration_months"],
+        "material_index": selected_row["material_index"],
+        "manpower_hours_per_km": selected_row["manpower_hours_per_km"],
+        "machinery_hours_per_km": selected_row["machinery_hours_per_km"],
+    }
 
     st.markdown("## Report Options")
 
