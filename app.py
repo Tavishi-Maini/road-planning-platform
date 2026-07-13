@@ -14,7 +14,12 @@ from src.database.demo_seed import seed_demo_projects
 from src.database.project_repository import delete_duplicate_projects
 from download_models import download_models
 
-download_models()
+@st.cache_resource(show_spinner="Downloading AI models...")
+def ensure_models():
+    download_models()
+    return True
+
+ensure_models()
 
 st.set_page_config(
     page_title="RoadPlan AI",
