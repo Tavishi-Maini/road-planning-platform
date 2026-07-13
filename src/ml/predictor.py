@@ -195,6 +195,52 @@ def prepare_features(project_data):
     rainfall_zone = project_data.get("rainfall_zone", "Moderate")
     road_category = project_data.get("road_category", "National Highway")
     project_type = project_data.get("project_type", "New Construction")
+    utility_yes = (
+        str(project_data.get("utility_shifting_required", "No")).strip().lower() == "yes"
+    )
+    
+    project_type_config = {
+        "New Construction": {
+            "traffic_complexity_add": 0,
+            "utility_add": 0,
+            "working_days_penalty": 0,
+        },
+        "Road Upgrade": {
+            "traffic_complexity_add": 0,
+            "utility_add": 3,
+            "working_days_penalty": 0,
+        },
+        "Rehabilitation": {
+            "traffic_complexity_add": 1,
+            "utility_add": 3,
+            "working_days_penalty": 1,
+        },
+        "Widening": {
+            "traffic_complexity_add": 1,
+            "utility_add": 12,
+            "working_days_penalty": 2,
+        },
+        "Elevated Corridor": {
+            "traffic_complexity_add": 2,
+            "utility_add": 25,
+            "working_days_penalty": 4,
+        },
+        "Expressway": {
+            "traffic_complexity_add": 0,
+            "utility_add": 5,
+            "working_days_penalty": 0,
+        },
+        "Bypass": {
+            "traffic_complexity_add": 0,
+            "utility_add": 2,
+            "working_days_penalty": 0,
+        },
+    }
+
+    type_cfg = project_type_config.get(
+        project_type,
+        project_type_config["New Construction"],
+    )
 
     terrain_map = {
         "Plain": 0,
@@ -393,6 +439,23 @@ def prepare_features(project_data):
     steel_price_index = np.clip(steel_price_index, 50, 200)
     diesel_price_index = np.clip(diesel_price_index, 60, 200)
 
+    base_traffic_complexity = risk_map.get(risk, 1)
+    traffic_management_complexity = min(
+        3,
+        base_traffic_complexity + type_cfg["traffic_complexity_add"]
+    )
+    base_utility_index = 45 if utility_yes else 8
+    utility_relocation_index = min(
+        100,
+        base_utility_index + type_cfg["utility_add"]
+    )
+    working_days_per_month = (
+        24 if rainfall_zone in ["Low", "Moderate"] else 21
+    )
+    working_days_per_month = max(
+        18,
+        working_days_per_month - type_cfg["working_days_penalty"]
+    )
 
     feature_values = {
         "project_year": 2026,
@@ -431,7 +494,7 @@ def prepare_features(project_data):
         "aadt": float(project_data.get("aadt", 10000)),
         "vdf": float(project_data.get("vdf", 3.5)),
         "pct_commercial_vehicles": min(55, 25 + float(project_data.get("traffic_growth_rate_pct", 5)) * 2),
-        "traffic_management_complexity": risk_map.get(risk, 1),
+        "traffic_management_complexity": traffic_management_complexity,
 
         "num_major_bridges": num_major_bridges,
         "num_minor_bridges": num_minor_bridges,
@@ -460,8 +523,8 @@ def prepare_features(project_data):
         "quarry_distance_km": quarry_distance,
 
         "blasting_required": 1 if terrain_class >= 2 or rock_excavation > 30 else 0,
-        "utility_relocation_index": 45 if utility_yes else 8,
-        "working_days_per_month": 24 if rainfall_zone in ["Low", "Moderate"] else 21,
+        "utility_relocation_index": utility_relocation_index,
+        "working_days_per_month": working_days_per_month,
         "rain_delay_days_per_year": rain_delay,
 
         "crew_size": 80 + road_length * 0.8 + terrain_class * 20,
@@ -552,24 +615,56 @@ def run_prediction(project_data):
     for target_name, model in models.items():
         prediction = model.predict(input_df)[0]
         prediction = float(prediction)
+
         if target_name == "material_index":
             prediction = np.clip(prediction, 123.0, 150.0)
-            
+
         predictions[target_name] = prediction
-        
+
+    # ---------------------------------------------------------
+    # Business Rule Overrides
+    # ---------------------------------------------------------
+
     project_type = project_data.get("project_type", "")
     road_category = project_data.get("road_category", "")
     length_km = float(project_data.get("road_length_km", 0))
 
     if road_category == "Rural Road" and project_type == "Road Upgrade":
-        predictions["total_cost"] = length_km * 180  # lakhs/km = ₹1.8 Cr/km
+        predictions["total_cost"] = length_km * 180  # lakhs
         predictions["duration"] = max(12, length_km * 1.2)
-        predictions["manpower_hours_per_km"] = min(predictions["manpower_hours_per_km"], 5900)
-        predictions["machinery_hours_per_km"] = min(predictions["machinery_hours_per_km"], 4400)
+        predictions["manpower_hours_per_km"] = min(
+            predictions["manpower_hours_per_km"], 5900
+        )
+        predictions["machinery_hours_per_km"] = min(
+            predictions["machinery_hours_per_km"], 4400
+        )
+
+    # ---------------------------------------------------------
+    # Final Prediction Guard
+    # ---------------------------------------------------------
+
+    predictions["material_index"] = float(
+        np.clip(predictions["material_index"], 123.0, 150.0)
+    )
+
+    predictions["machinery_hours_per_km"] = float(
+        np.clip(predictions["machinery_hours_per_km"], 3500.0, 6500.0)
+    )
+
+    predictions["manpower_hours_per_km"] = float(
+        np.clip(predictions["manpower_hours_per_km"], 5000.0, 8000.0)
+    )
+
+    predictions["construction_duration_months"] = float(
+        np.clip(predictions["construction_duration_months"], 12.0, 220.0)
+    )
+
+    predictions["total_cost_lakhs"] = float(
+        max(predictions["total_cost_lakhs"], 1000.0)
+    )
 
     return {
         "success": True,
         "missing_features": [],
         "predictions": predictions,
     }
-    
