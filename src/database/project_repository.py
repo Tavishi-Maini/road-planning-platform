@@ -101,7 +101,7 @@ def update_project_prediction(
     client = get_supabase_client()
 
     payload = {
-        "total_cost": predictions.get("total_cost"),
+        "total_cost_lakhs": predictions.get("total_cost"),
         "construction_duration_months": predictions.get(
             "construction_duration_months"
         ),

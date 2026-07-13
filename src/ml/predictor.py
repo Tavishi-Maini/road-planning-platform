@@ -611,16 +611,12 @@ def run_prediction(project_data):
     models = load_models()
     predictions = {}
 
-    # ---------------------------------------------------------
     # Model predictions
-    # ---------------------------------------------------------
     for target_name, model in models.items():
         prediction = float(model.predict(input_df)[0])
         predictions[target_name] = prediction
 
-    # ---------------------------------------------------------
-    # Project-specific business rules
-    # ---------------------------------------------------------
+    # Project-specific rules
     project_type = str(
         project_data.get("project_type", "")
     ).strip()
@@ -633,15 +629,13 @@ def run_prediction(project_data):
         project_data.get("road_length_km", 0) or 0
     )
 
-    # The training dataset contained no comparable rural-upgrade rows,
-    # so use a controlled engineering rule for this unsupported segment.
     if (
         road_category == "Rural Road"
         and project_type == "Road Upgrade"
     ):
-        predictions["total_cost_lakhs"] = length_km * 180.0
+        predictions["total_cost"] = length_km * 180.0
 
-        predictions["construction_duration_months"] = max(
+        predictions["duration"] = max(
             12.0,
             length_km * 1.2,
         )
@@ -656,19 +650,14 @@ def run_prediction(project_data):
             4400.0,
         )
 
-    # ---------------------------------------------------------
     # Final prediction guards
-    # ---------------------------------------------------------
-    predictions["total_cost_lakhs"] = float(
-        max(
-            predictions["total_cost_lakhs"],
-            1000.0,
-        )
+    predictions["total_cost"] = float(
+        max(predictions["total_cost"], 1000.0)
     )
 
-    predictions["construction_duration_months"] = float(
+    predictions["duration"] = float(
         np.clip(
-            predictions["construction_duration_months"],
+            predictions["duration"],
             12.0,
             220.0,
         )
