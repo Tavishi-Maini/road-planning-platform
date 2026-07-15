@@ -1,4 +1,5 @@
 import streamlit as st
+import json
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -141,6 +142,24 @@ def safe_float(value, default=0.0):
     except (TypeError, ValueError):
         return default
 
+def normalize_prediction_data(prediction_data):
+    return {
+        "total_cost": prediction_data.get(
+            "total_cost",
+            prediction_data.get("total_cost_lakhs")
+        ),
+        "duration": prediction_data.get(
+            "duration",
+            prediction_data.get("construction_duration_months")
+        ),
+        "material_index": prediction_data.get("material_index"),
+        "manpower_hours_per_km": prediction_data.get(
+            "manpower_hours_per_km"
+        ),
+        "machinery_hours_per_km": prediction_data.get(
+            "machinery_hours_per_km"
+        ),
+    }
 
 def build_project_timeline(duration):
     phases = [
@@ -230,80 +249,94 @@ def render_results():
     #     ].to_dict()
     # )
 
-    required_prediction_columns = [
-        "total_cost_lakhs",
-        "construction_duration_months",
+    raw_prediction_data = selected_row.get("prediction_data")
+
+    if raw_prediction_data is None or pd.isna(raw_prediction_data):
+        st.warning(
+            "This project does not have saved prediction data. "
+            "Run the prediction again from the Prediction page."
+        )
+        return
+
+    try:
+        if isinstance(raw_prediction_data, str):
+            prediction_data = json.loads(raw_prediction_data)
+        elif isinstance(raw_prediction_data, dict):
+            prediction_data = raw_prediction_data
+        else:
+            raise TypeError(
+                "Saved prediction data has an unsupported format."
+            )
+
+        prediction_data = normalize_prediction_data(
+            prediction_data
+        )
+
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        friendly_error_box(
+            "Prediction results could not be loaded.",
+            possible_reasons=[
+                "Saved prediction data is missing",
+                "Prediction data is corrupted",
+                "The selected project has incomplete results",
+            ],
+            technical_error=error,
+        )
+        return
+
+
+    required_prediction_fields = [
+        "total_cost",
+        "duration",
         "material_index",
         "manpower_hours_per_km",
         "machinery_hours_per_km",
     ]
 
-    missing_prediction_fields = [
-        column
-        for column in required_prediction_columns
-        if column not in selected_row.index
-        or selected_row.get(column) is None
-        or pd.isna(selected_row.get(column))
+    missing_fields = [
+        field
+        for field in required_prediction_fields
+        if prediction_data.get(field) is None
     ]
 
-    if missing_prediction_fields:
+    if missing_fields:
         st.warning(
             "This project does not have a complete saved prediction. "
             "Run the prediction again from the Prediction page."
         )
-        st.write("Missing fields:", missing_prediction_fields)
+
+        st.write("Missing fields:")
+        st.json(missing_fields)
         return
+
+
+    total_cost = safe_float(
+        prediction_data["total_cost"]
+    )
+    duration = safe_float(
+        prediction_data["duration"]
+    )
+    material_index = safe_float(
+        prediction_data["material_index"]
+    )
+    manpower = safe_float(
+        prediction_data["manpower_hours_per_km"]
+    )
+    machinery = safe_float(
+        prediction_data["machinery_hours_per_km"]
+    )
 
     try:
-        total_cost = safe_float(
-            selected_row.get("total_cost_lakhs")
+        confidence = calculate_prediction_confidence(
+            prediction_data,
+            project_data,
         )
-        duration = safe_float(
-            selected_row.get("construction_duration_months")
-        )
-        material_index = safe_float(
-            selected_row.get("material_index")
-        )
-        manpower = safe_float(
-            selected_row.get("manpower_hours_per_km")
-        )
-        machinery = safe_float(
-            selected_row.get("machinery_hours_per_km")
-        )
-
-    # Compatibility dictionary used by confidence and recommendations
-        prediction_data = {
-            "total_cost": total_cost,
-            "duration": duration,
-            "material_index": material_index,
-            "manpower_hours_per_km": manpower,
-            "machinery_hours_per_km": machinery,
+    except Exception:
+        confidence = {
+            "confidence": 90,
+            "quality": "Good",
+            "status": "High",
         }
-
-        try:
-            confidence = calculate_prediction_confidence(
-                prediction_data,
-                project_data,
-            )
-        except Exception:
-            confidence = {
-                "confidence": 90,
-                "quality": "High",
-                "status": "Verified",
-            }
-
-    except Exception as e:
-        friendly_error_box(
-            "Prediction results could not be loaded.",
-            possible_reasons=[
-                "Prediction data is missing",
-                "Saved prediction data is corrupted",
-                "The selected project has incomplete results",
-            ],
-            technical_error=e,
-        )
-        return
-
 
     st.success("Prediction completed and available for planning review.")
 
@@ -459,21 +492,41 @@ def render_results():
             ).iterrows(),
             start=1,
         ):
+            raw_history_prediction = row.get("prediction_data")
+
+            try:
+                if isinstance(raw_history_prediction, str):
+                    history_prediction = json.loads(
+                        raw_history_prediction
+                    )
+                elif isinstance(raw_history_prediction, dict):
+                    history_prediction = raw_history_prediction
+                else:
+                    continue
+
+                history_prediction = normalize_prediction_data(
+                    history_prediction
+                )
+
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+
             row_total_cost = safe_float(
-                row.get("total_cost_lakhs")
+                history_prediction.get("total_cost")
             )
             row_duration = safe_float(
-                row.get("construction_duration_months")
+                history_prediction.get("duration")
             )
             row_material = safe_float(
-                row.get("material_index")
+                history_prediction.get("material_index")
             )
             row_manpower = safe_float(
-                row.get("manpower_hours_per_km")
+                history_prediction.get("manpower_hours_per_km")
             )
             row_machinery = safe_float(
-                row.get("machinery_hours_per_km")
+                history_prediction.get("machinery_hours_per_km")
             )
+
             history_rows.append({
                 "Run": f"Prediction {run_number}",
                 "Timestamp": row.get("created_at", ""),
@@ -485,11 +538,18 @@ def render_results():
                 "Manpower/km": f"{row_manpower:.2f}",
                 "Machinery/km": f"{row_machinery:.2f}",
             })
+
+        if history_rows:
             history_display_df = pd.DataFrame(history_rows)
+
             st.dataframe(
                 history_display_df,
                 width="stretch",
                 hide_index=True,
+            )
+        else:
+            st.info(
+                "No readable saved prediction record is available."
             )
 
     st.markdown("## Cost Summary")

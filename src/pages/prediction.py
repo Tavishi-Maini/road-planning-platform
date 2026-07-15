@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from src.ui.navigation import navigate_to
 from src.ml.model_loader import load_models
 from src.ml.predictor import prepare_features
 from src.utils.formatters import format_cost_lakhs_as_cr
@@ -12,23 +13,19 @@ from src.database.project_repository import (
     delete_project
 )
 from src.ml.predictor import run_prediction, validate_project_features
-
-def go_to_results(project_id):
-    st.session_state.selected_result_project_id = project_id
-    # Remove the old sidebar radio value ("Prediction")
-    if "sidebar_navigation" in st.session_state:
-        del st.session_state["sidebar_navigation"]
-    st.rerun()
     
-def go_to_results(project_id):
-    st.session_state.selected_result_project_id = project_id
-    st.session_state.navigation_page = "Results Dashboard"
     
 def render_prediction():
     page_header(
         "Prediction",
         "Run AI-based cost, duration, material, manpower, and machinery estimation"
     )
+    
+    if "completed_prediction_project_id" not in st.session_state:
+        st.session_state.completed_prediction_project_id = None
+
+    if "latest_predictions" not in st.session_state:
+        st.session_state.latest_predictions = None
 
     projects_df = get_all_projects()
 
@@ -41,13 +38,57 @@ def render_prediction():
         for row in projects_df.itertuples()
     }
 
+    project_labels = list(project_options.keys())
+
+    requested_project_id = st.session_state.get(
+        "selected_prediction_project_id"
+    )
+
+    requested_label = None
+
+    if requested_project_id is not None:
+        for label, project_id in project_options.items():
+            if project_id == requested_project_id:
+                requested_label = label
+                break
+
+    # Set the widget value before the selectbox is created
+    if requested_label is not None:
+        st.session_state["prediction_project_selector"] = requested_label
+    elif "prediction_project_selector" not in st.session_state:
+        st.session_state["prediction_project_selector"] = project_labels[0]
+
     selected_project_label = st.selectbox(
         "Select saved project",
-        list(project_options.keys())
+        project_labels,
+        key="prediction_project_selector",
     )
 
     selected_project_id = project_options[selected_project_label]
+    
     project_data = get_project_by_id(selected_project_id)
+    if project_data is None:
+        st.error(
+            f"Project ID {selected_project_id} no longer exists in the database."
+        )
+        st.session_state.pop(
+            "prediction_project_selector",
+            None,
+        )
+        st.session_state.pop(
+            "selected_prediction_project_id",
+            None,
+        )
+        return
+
+    st.session_state.selected_prediction_project_id = selected_project_id
+    
+    # if (
+    #     st.session_state.completed_prediction_project_id is not None
+    #    and st.session_state.completed_prediction_project_id != selected_project_id
+    # ):
+    #     st.session_state.completed_prediction_project_id = None
+    #     st.session_state.latest_predictions = None
 
     st.markdown("## Selected Project Summary")
 
@@ -87,77 +128,53 @@ def render_prediction():
 
     st.markdown("## Run Prediction")
 
-    if st.button("Run AI Estimation", width="stretch"):
+    run_prediction_clicked = st.button(
+        "Run AI Estimation",
+        type="primary",
+        width="stretch",
+        key=f"run_prediction_{selected_project_id}",
+    )
+
+    if run_prediction_clicked:
         try:
             with st.spinner("Running AI estimation models..."):
                 result = run_prediction(project_data)
 
-            if not result["success"]:
+            if not result.get("success"):
                 friendly_error_box(
                     "Prediction could not be completed.",
                     possible_reasons=[
                         "Some required project fields are missing",
                         "Feature names do not match the trained model",
-                        "One or more input values are outside the supported range",
+                        "One or more input values are unsupported",
                     ],
                 )
                 return
 
             predictions = result["predictions"]
-            update_project_prediction(selected_project_id, predictions)
 
-            st.success("Prediction completed successfully.")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.button(
-                    "✓ Prediction Completed",
-                    disabled=True,
-                    width="stretch",
-                )
-            with col2:
-                st.button(
-                    "View Results Dashboard →",
-                    type="primary",
-                    width="stretch",
-                    key=f"view_results_{selected_project_id}",
-                    on_click=go_to_results,
-                    args=(selected_project_id,)
-                )
+            update_project_prediction(
+                selected_project_id,
+                predictions,
+            )
 
-            st.markdown("## Prediction Output")
+            st.session_state["latest_prediction_project_id"] = selected_project_id
+            st.session_state["latest_predictions"] = predictions
+            st.session_state["prediction_just_completed"] = True
 
-            p1, p2, p3, p4, p5 = st.columns(5)
-
-            with p1:
-                metric_card("Total Cost", format_cost_lakhs_as_cr(predictions["total_cost"]), "Estimated project cost")
-
-            with p2:
-                metric_card("Duration", f"{predictions['duration']:.2f} months", "Estimated construction duration")
-
-            with p3:
-                metric_card("Material Index", f"{predictions['material_index']:.2f}", "Material intensity score")
-
-            with p4:
-                metric_card("Manpower Hours/km", f"{predictions['manpower_hours_per_km']:.2f}", "Labour intensity")
-
-            with p5:
-                metric_card("Machinery Hours/km", f"{predictions['machinery_hours_per_km']:.2f}", "Equipment intensity")
-
-            st.info("These results are now saved locally and will be used in the Results Dashboard phase.")
-
-        except FileNotFoundError as e:
+        except FileNotFoundError as error:
             friendly_error_box(
                 "Prediction could not be completed.",
                 possible_reasons=[
-                    "One or more .joblib model files are missing",
-                    "The model directory path is incorrect",
-                    "Model filenames do not match the configured names",
+                    "One or more model files are missing",
+                    "The model directory is incorrect",
+                    "A configured model filename is invalid",
                 ],
-                technical_error=e,
+                technical_error=error,
             )
+            return
 
-        except ValueError as e:
+        except ValueError as error:
             friendly_error_box(
                 "Prediction could not be completed.",
                 possible_reasons=[
@@ -165,16 +182,83 @@ def render_prediction():
                     "A categorical value is unsupported",
                     "A numeric field contains an invalid value",
                 ],
-                technical_error=e,
+                technical_error=error,
             )
+            return
 
-        except Exception as e:
+        except Exception as error:
             friendly_error_box(
                 "Prediction could not be completed.",
                 possible_reasons=[
-                    "Missing project fields",
-                    "Invalid model file",
-                    "Unsupported input values",
+                    "Project inputs are incomplete",
+                    "A trained model could not be loaded",
+                    "The model received an unsupported value",
                 ],
-                technical_error=e,
+                technical_error=error,
+            )
+            return
+
+    prediction_is_available = (
+        st.session_state.get("latest_prediction_project_id")
+        == selected_project_id
+        and st.session_state.get("latest_predictions") is not None
+    )
+
+    if prediction_is_available:
+        predictions = st.session_state["latest_predictions"]
+
+        if st.session_state.get("prediction_just_completed"):
+            st.success("Prediction completed successfully.")
+            st.session_state["prediction_just_completed"] = False
+
+        st.markdown("## Prediction Output")
+
+        p1, p2, p3, p4, p5 = st.columns(5)
+
+        with p1:
+            metric_card(
+                "Total Cost",
+                format_cost_lakhs_as_cr(predictions["total_cost"]),
+                "Estimated project cost",
+            )
+
+        with p2:
+            metric_card(
+                "Duration",
+                f"{predictions['duration']:.2f} months",
+                "Estimated construction duration",
+            )
+
+        with p3:
+            metric_card(
+                "Material Index",
+                f"{predictions['material_index']:.2f}",
+                "Material intensity score",
+            )
+
+        with p4:
+            metric_card(
+                "Manpower Hours/km",
+                f"{predictions['manpower_hours_per_km']:.2f}",
+                "Labour intensity",
+            )
+
+        with p5:
+            metric_card(
+                "Machinery Hours/km",
+                f"{predictions['machinery_hours_per_km']:.2f}",
+                "Equipment intensity",
+            )
+
+        st.markdown("---")
+
+        if st.button(
+            "View Results Dashboard →",
+            type="primary",
+            width="stretch",
+            key=f"view_results_{selected_project_id}",
+        ):
+            navigate_to(
+                "Results Dashboard",
+                selected_result_project_id=selected_project_id,
             )

@@ -1,7 +1,7 @@
 from typing import Any
-
+import json
 import pandas as pd
-
+from src.database.db import get_connection
 from src.database.supabase_client import get_supabase_client
 
 
@@ -30,176 +30,319 @@ def get_prediction_history():
 
     return projects
 
-def save_project(project_data: dict[str, Any]) -> int:
-    client = get_supabase_client()
+def save_prediction_history(project_id, prediction_data):
+    conn = get_connection()
 
-    payload = project_data.copy()
-    payload.setdefault("project_type", "New Construction")
-    payload.setdefault("prediction_status", "Pending")
+    try:
+        cursor = conn.cursor()
 
-    response = (
-        client.table(TABLE_NAME)
-        .insert(payload)
-        .execute()
-    )
-
-    if not response.data:
-        raise RuntimeError("Supabase did not return the inserted project.")
-
-    return int(response.data[0]["id"])
-
-
-def get_all_projects() -> pd.DataFrame:
-    client = get_supabase_client()
-
-    response = (
-        client.table(TABLE_NAME)
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-    )
-
-    return pd.DataFrame(response.data or [])
-
-
-def get_project_by_id(project_id: int) -> dict[str, Any] | None:
-    client = get_supabase_client()
-
-    response = (
-        client.table(TABLE_NAME)
-        .select("*")
-        .eq("id", project_id)
-        .limit(1)
-        .execute()
-    )
-
-    if not response.data:
-        return None
-
-    return response.data[0]
-
-
-def project_exists(project_name: str, location: str) -> bool:
-    client = get_supabase_client()
-
-    response = (
-        client.table(TABLE_NAME)
-        .select("id")
-        .eq("project_name", project_name)
-        .eq("location", location)
-        .limit(1)
-        .execute()
-    )
-
-    return bool(response.data)
-
-
-def update_project_prediction(project_id: int, predictions: dict) -> None:
-    client = get_supabase_client()
-
-    payload = {
-        "total_cost_lakhs": predictions.get("total_cost"),
-        "construction_duration_months": predictions.get("duration"),
-        "material_index": predictions.get("material_index"),
-        "manpower_hours_per_km": predictions.get("manpower_hours_per_km"),
-        "machinery_hours_per_km": predictions.get("machinery_hours_per_km"),
-        "prediction_status": "Completed",
-    }
-
-    print("Predictions received:", predictions)
-    print("Payload being saved:", payload)
-
-    if payload["construction_duration_months"] is None:
-        raise ValueError(
-            "Duration is missing from predictions. "
-            f"Available keys: {list(predictions.keys())}"
+        cursor.execute(
+            """
+            INSERT INTO prediction_history (
+                project_id,
+                prediction_data
+            )
+            VALUES (?, ?)
+            """,
+            (
+                int(project_id),
+                json.dumps(prediction_data),
+            ),
         )
 
-    response = (
-        client.table(TABLE_NAME)
-        .update(payload)
-        .eq("id", project_id)
-        .execute()
-    )
-    #print("Supabase update response:", response.data)
+        conn.commit()
 
-    if not response.data:
-        raise RuntimeError(
-            f"Failed to update prediction for project ID {project_id}."
-        )
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
         
-    verification = (
-        client.table(TABLE_NAME)
-        .select(
-            "id, total_cost_lakhs, construction_duration_months, "
-            "material_index, manpower_hours_per_km, "
-            "machinery_hours_per_km, prediction_status"
+
+def save_project(project_data):
+    conn = get_connection()
+
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO projects (
+                project_name,
+                location,
+                road_category,
+                terrain_type,
+                road_length_km,
+                number_of_lanes,
+                design_speed_kmph,
+                aadt,
+                subgrade_cbr_pct,
+                risk_level,
+                prediction_status,
+                project_data
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_data["project_name"],
+                project_data["location"],
+                project_data["road_category"],
+                project_data["terrain_type"],
+                project_data["road_length_km"],
+                project_data["number_of_lanes"],
+                project_data["design_speed_kmph"],
+                project_data["aadt"],
+                project_data["subgrade_cbr_pct"],
+                project_data["risk_level"],
+                project_data.get("prediction_status", "Pending"),
+                json.dumps(project_data),
+            ),
         )
-        .eq("id", project_id)
-        .single()
-        .execute()
-    )
 
-    # print("Verified database row:", verification.data)
+        new_project_id = cursor.lastrowid
+        conn.commit()
 
-def delete_project(project_id: int) -> None:
-    client = get_supabase_client()
+        return new_project_id
 
-    response = (
-        client.table(TABLE_NAME)
-        .delete()
-        .eq("id", project_id)
-        .execute()
-    )
+    except Exception:
+        conn.rollback()
+        raise
+    
+    finally:
+        conn.close()
 
-    if response.data is None:
-        raise RuntimeError(
-            f"Failed to delete project {project_id}."
+def get_all_projects():
+    conn = get_connection()
+
+    try:
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                project_name,
+                location,
+                road_category,
+                terrain_type,
+                road_length_km,
+                number_of_lanes,
+                design_speed_kmph,
+                aadt,
+                subgrade_cbr_pct,
+                risk_level,
+                prediction_status,
+                prediction_data,
+                project_data,
+                created_at
+            FROM projects
+            ORDER BY id DESC
+            """,
+            conn,
         )
+
+    finally:
+        conn.close()
+
+
+def get_project_by_id(project_id): #no
+    conn = get_connection()
+
+    try:
+        cursor = conn.cursor() 
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                project_name,
+                location,
+                road_category,
+                terrain_type,
+                road_length_km,
+                number_of_lanes,
+                design_speed_kmph,
+                aadt,
+                subgrade_cbr_pct,
+                risk_level,
+                prediction_status,
+                prediction_data,
+                project_data,
+                created_at
+            FROM projects
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (int(project_id),),
+        )
+
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        columns = [description[0] for description in cursor.description]
+        record = dict(zip(columns, row))
+
+        # Return the full saved project input dictionary when available
+        if record.get("project_data"):
+            try:
+                saved_project_data = json.loads(record["project_data"])
+                saved_project_data["id"] = record["id"]
+                saved_project_data["prediction_status"] = record["prediction_status"]
+                saved_project_data["prediction_data"] = record["prediction_data"]
+                saved_project_data["created_at"] = record["created_at"]
+                return saved_project_data
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return record
+
+    finally:
+        conn.close()
+
+
+def project_exists(project_name, location): #no
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM projects
+            WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(?))
+              AND LOWER(TRIM(location)) = LOWER(TRIM(?))
+            LIMIT 1
+            """,
+            (
+                project_name.strip(),
+                location.strip(),
+            ),
+        )
+        return cursor.fetchone() is not None
+
+    finally:
+        conn.close()
+
+
+def update_project_prediction(project_id, prediction_data):
+    conn = get_connection()
+
+    try:
+        cursor = conn.cursor()
+
+        project_id = int(project_id)
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM projects
+            WHERE id = ?
+            """,
+            (project_id,),
+        )
+
+        existing_project = cursor.fetchone()
+
+        if existing_project is None:
+            raise RuntimeError(
+                f"Project ID {project_id} does not exist in the active database."
+            )
+
+        cursor.execute(
+            """
+            UPDATE projects
+            SET
+                prediction_status = ?,
+                prediction_data = ?
+            WHERE id = ?
+            """,
+            (
+                "Completed",
+                json.dumps(prediction_data),
+                project_id,
+            ),
+        )
+
+        conn.commit()
+
+        save_prediction_history(
+            project_id,
+            prediction_data,
+        )
+
+        return True
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+        
+
+def delete_project(project_id):
+    conn = get_connection()
+
+    try:
+        cursor = conn.cursor()
+        project_id = int(project_id)
+
+        cursor.execute(
+            """
+            DELETE FROM prediction_history
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM projects
+            WHERE id = ?
+            """,
+            (project_id,),
+        )
+
+        deleted_rows = cursor.rowcount
+        conn.commit()
+
+        return deleted_rows > 0
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
         
 def delete_duplicate_projects() -> int:
-    """
-    Deletes duplicate projects that have the same project_name and location.
+    conn = get_connection()
 
-    Keeps the newest record and removes older duplicates.
-    Returns the number of deleted rows.
-    """
-    client = get_supabase_client()
+    try:
+        cursor = conn.cursor()
 
-    response = (
-        client.table(TABLE_NAME)
-        .select("id, project_name, location, created_at")
-        .order("created_at", desc=True)
-        .execute()
-    )
-
-    rows = response.data or []
-
-    seen = set()
-    duplicate_ids = []
-
-    for row in rows:
-        key = (
-            str(row.get("project_name", "")).strip().lower(),
-            str(row.get("location", "")).strip().lower(),
+        cursor.execute(
+            """
+            DELETE FROM projects
+            WHERE id NOT IN (
+                SELECT MAX(id)
+                FROM projects
+                GROUP BY
+                    LOWER(TRIM(project_name)),
+                    LOWER(TRIM(location))
+            )
+            """
         )
 
-        if key in seen:
-            duplicate_ids.append(row["id"])
-        else:
-            seen.add(key)
+        deleted_count = cursor.rowcount
+        conn.commit()
 
-    deleted_count = 0
+        return deleted_count
 
-    for project_id in duplicate_ids:
-        delete_response = (
-            client.table(TABLE_NAME)
-            .delete()
-            .eq("id", project_id)
-            .execute()
-        )
+    except Exception:
+        conn.rollback()
+        raise
 
-        if delete_response.data is not None:
-            deleted_count += 1
-
-    return deleted_count
+    finally:
+        conn.close()

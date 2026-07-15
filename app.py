@@ -1,5 +1,12 @@
 import streamlit as st
 
+st.set_page_config(
+    page_title="RoadPlan AI",
+    page_icon="🛣️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 from src.ui.theme import apply_theme
 from src.ui.sidebar import render_sidebar
 from src.database.db import init_database
@@ -11,7 +18,6 @@ from src.pages.comparison import render_comparison
 from src.pages.reports import render_reports
 from src.pages.settings import render_settings
 from src.database.demo_seed import seed_demo_projects
-from src.database.project_repository import delete_duplicate_projects
 from download_models import download_models
 
 @st.cache_resource(show_spinner="Downloading AI models...")
@@ -20,13 +26,6 @@ def ensure_models():
     return True
 
 ensure_models()
-
-st.set_page_config(
-    page_title="RoadPlan AI",
-    page_icon="🛣️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 apply_theme()
 init_database()
@@ -50,3 +49,5 @@ elif page == "Reports":
     render_reports()
 elif page == "Settings":
     render_settings()
+else:
+    st.error(f"Unknown page: {page}")

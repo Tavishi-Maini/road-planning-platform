@@ -2,6 +2,7 @@ import streamlit as st
 from src.ui.components import page_header
 from src.database.project_repository import save_project, project_exists
 from src.database.project_repository import get_all_projects, delete_project, get_project_by_id
+from src.ui.navigation import navigate_to
 
 def validate_numeric_inputs(project_data):
     errors = []
@@ -50,9 +51,21 @@ def validate_numeric_inputs(project_data):
 
     return errors
 
+def go_to_prediction(project_id):
+    st.session_state.selected_prediction_project_id = project_id
+    st.session_state.requested_navigation_page = "Prediction"
 
 def render_new_project():
     page_header("New Project", "Create and validate a new road construction project")
+    
+    save_message = st.session_state.pop("save_success_message", None)
+
+    if save_message:
+        st.success(save_message)
+        st.info(
+            "Select the saved project under Project Manager and click "
+            "**Run Prediction →**."
+        )
 
     if "projects" not in st.session_state:
         st.session_state.projects = []
@@ -210,8 +223,9 @@ def render_new_project():
             )
             
     if reset:
-        st.session_state.clear()
-        st.rerun()
+        st.info(
+            "Refresh the page or navigate away and return to clear the form."
+        )
 
     required_fields = {
         "Project Name": project_name,
@@ -243,6 +257,11 @@ def render_new_project():
     )
 
     projects_df = get_all_projects()
+    if not projects_df.empty:
+        projects_df = projects_df.sort_values(
+            "id",
+            ascending=False
+        ).reset_index(drop=True)
 
     if projects_df.empty:
         st.info("No saved projects available.")
@@ -253,67 +272,118 @@ def render_new_project():
             f"{row.project_name} | ID: {row.id}": row.id
             for row in projects_df.itertuples()
         }
-
         selected_project = st.selectbox(
-            "Select project to manage",
-            list(project_options.keys())
-        )
+           "Select project to manage",
+           list(project_options.keys())
+       )
 
         selected_project_id = project_options[selected_project]
 
         col1, col2, col3 = st.columns(3)
+
         with col1:
-            if st.button("👁 Load Details", width="stretch"):
+            if st.button(
+                "Load Project Details",
+                width="stretch",
+                key=f"load_project_{selected_project_id}",
+            ):
                 project_data = get_project_by_id(selected_project_id)
                 st.json(project_data)
+
         with col2:
-            if st.button("➡️ Predict This Project", width="stretch"):
-                st.session_state.active_page = "Prediction"
-                st.rerun()
+            if st.button(
+                "Run Prediction →",
+                type="primary",
+                width="stretch",
+                key=f"predict_project_{selected_project_id}",
+            ):
+                # Clear the previous Prediction-page selectbox state
+                st.session_state.pop("prediction_project_selector", None)
+                navigate_to(
+                    "Prediction",
+                    selected_prediction_project_id=selected_project_id,
+                )
+
         with col3:
             if st.button(
                 "🗑 Delete Project",
+                width="stretch",
                 key=f"delete_btn_{selected_project_id}",
-                width="stretch"
             ):
                 st.session_state.delete_project_id = selected_project_id
-    
+
     if st.session_state.delete_project_id is not None:
-        project = get_project_by_id(
-            st.session_state.delete_project_id
-        )
-        st.warning(
-            f"Are you sure you want to permanently delete "
-            f"**{project['project_name']}**? This action cannot be undone."
-        )
+        project_id_to_delete = int(st.session_state.delete_project_id)
+        project = get_project_by_id(project_id_to_delete)
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button(
-                "✅ Yes, Delete",
-                type="primary",
-                key="confirm_delete"
-            ):
-                delete_project(
-                    st.session_state.delete_project_id
-                )
-                st.session_state.delete_project_id = None
-                st.success("Project deleted successfully.")
-                st.rerun()
+        if project is None:
+            st.error(
+                f"Project ID {project_id_to_delete} is visible in the project list "
+                "but could not be retrieved from the database."
+            )
 
-        with c2:
-            if st.button(
-                "❌ Cancel",
-                key="cancel_delete"
-            ):
+            if st.button("Clear Delete Selection"):
                 st.session_state.delete_project_id = None
                 st.rerun()
 
+        else:
+            st.warning(
+                f"Are you sure you want to permanently delete "
+                f"**{project.get('project_name', 'Selected Project')}**? "
+                "This action cannot be undone."
+            )
+
+            c1, c2 = st.columns(2)
+
+            with c1:
+                if st.button(
+                    "✅ Yes, Delete",
+                    type="primary",
+                    key=f"confirm_delete_{project_id_to_delete}",
+                    width="stretch",
+                ):
+                    deleted = delete_project(project_id_to_delete)
+                    st.session_state.delete_project_id = None
+                    if deleted:
+                        st.session_state["delete_success_message"] = (
+                            "Project deleted successfully."
+                        )
+                    else:
+                        st.session_state["delete_error_message"] = (
+                            "No matching project was deleted."
+                        )
+                    st.rerun()
+
+            with c2:
+                if st.button(
+                    "❌ Cancel",
+                    key=f"cancel_delete_{project_id_to_delete}",
+                    width="stretch",
+                ):
+                    st.session_state.delete_project_id = None
+                    st.rerun()
+                
     if submitted:
-        missing_fields = [
-            field for field, value in required_fields.items()
-            if value in ["", None, 0, 0.0]
-        ]
+        st.info("Save button received. Validating project...")
+
+        missing_fields = []
+
+        if not project_name.strip():
+            missing_fields.append("Project Name")
+        if not location.strip():
+            missing_fields.append("Location")
+        if road_length <= 0:
+            missing_fields.append("Road Length")
+        if carriageway_width <= 0:
+            missing_fields.append("Carriageway Width")
+        if lanes <= 0:
+            missing_fields.append("Number of Lanes")
+        if design_speed <= 0:
+            missing_fields.append("Design Speed")
+        if aadt <= 0:
+            missing_fields.append("AADT")
+        if cbr <= 0:
+            missing_fields.append("Subgrade CBR")
 
         if missing_fields:
             st.error(
@@ -323,9 +393,9 @@ def render_new_project():
             return
 
         project_data = {
-            "project_name": project_name,
-            "location": location,
-            "project_owner": project_owner,
+            "project_name": project_name.strip(),
+            "location": location.strip(),
+            "project_owner": project_owner.strip(),
             "road_category": road_category,
             "project_type": project_type,
             "terrain_type": terrain_type,
@@ -368,25 +438,56 @@ def render_new_project():
             "escalation_pct": escalation_pct,
             "prediction_status": "Pending",
         }
-        
+
         numeric_errors = validate_numeric_inputs(project_data)
-        
+
         if numeric_errors:
-            st.error("Please fix the following input errors before saving:")
+            st.error("Please fix these values before saving:")
+
             for error in numeric_errors:
-                st.write(f"- {error}")
+                st.write(f"• {error}")
+
             return
 
-        if project_exists(project_name, location):
-            st.warning("A project with the same name and location already exists. Duplicate not saved.")
-        else:
-            save_project(project_data)
-            st.success("Project saved successfully in SQLite database.")
+        if project_exists(project_name.strip(), location.strip()):
+            st.warning(
+                "This project is already saved in the database. "
+                "It was not inserted again."
+            )
+            st.session_state["save_success_message"] = (
+                f"Project '{project_name.strip()}' already exists. "
+                "Select it from Project Manager below."
+            )
             st.rerun()
-            
-        st.markdown("### Saved Project Preview")
-        st.json(project_data)
 
-        if st.button("➡️ Proceed to Prediction", width="stretch"):
-            st.session_state.active_page = "Prediction"
-            st.rerun()
+        st.write("Saving project:", project_data["project_name"])
+
+        try:
+            new_project_id = save_project(project_data)
+            st.write("Returned project ID:", new_project_id)
+            projects_after_save = get_all_projects()
+
+            st.write("Projects currently in database:")
+            st.dataframe(projects_after_save, width="stretch")
+
+            if new_project_id is None:
+                st.error(
+                    "The database function ran, but save_project() returned None."
+                )
+                return
+
+            saved_project = get_project_by_id(new_project_id)
+
+            if not saved_project:
+                st.error(
+                    f"Project ID {new_project_id} was returned, "
+                    "but the row could not be read from SQLite."
+                )
+                return
+            st.success(
+                f"Project saved successfully with ID {new_project_id}."
+            )
+
+        except Exception as error:
+            st.error("Project could not be saved.")
+            st.exception(error)

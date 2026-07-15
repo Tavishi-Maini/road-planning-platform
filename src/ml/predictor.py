@@ -657,6 +657,7 @@ def run_prediction(project_data):
     predictions["total_cost"] = float(
         max(predictions["total_cost"], 1000.0)
     )
+    terrain = project_data.get("terrain_type", "")
 
     predictions["duration"] = float(
         np.clip(
@@ -665,6 +666,12 @@ def run_prediction(project_data):
             220.0,
         )
     )
+    
+    if terrain == "Hilly":
+        predictions["total_cost"] *= 1.25
+
+    elif terrain == "Mountainous":
+        predictions["total_cost"] *= 1.45
 
     predictions["material_index"] = float(
         np.clip(
