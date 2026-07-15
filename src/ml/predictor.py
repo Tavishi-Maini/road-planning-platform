@@ -652,6 +652,14 @@ def run_prediction(project_data):
     ):
         predictions["total_cost"] *= 1.30
         predictions["duration"] *= 1.20
+        
+    elif (
+        road_category == "Urban Road"
+        and project_type == "New Construction"
+    ):
+        predictions["total_cost"] *= 1.25
+        predictions["manpower_hours_per_km"] *= 1.05
+        predictions["machinery_hours_per_km"] *= 1.12
 
     # Final prediction guards
     predictions["total_cost"] = float(
