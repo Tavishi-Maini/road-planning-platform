@@ -1,348 +1,510 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
 from typing import Any
-import json
+
 import pandas as pd
-from src.database.db import get_connection
+
 from src.database.supabase_client import get_supabase_client
 
 
 TABLE_NAME = "projects"
 
-def get_prediction_history():
+
+# These names must match the columns in your Supabase projects table.
+PROJECT_INPUT_COLUMNS = [
+    "project_name",
+    "location",
+    "road_category",
+    "project_type",
+    "project_owner",
+    "terrain_type",
+    "project_stage",
+    "road_length_km",
+    "carriageway_width_m",
+    "number_of_lanes",
+    "shoulder_width_m",
+    "design_speed_kmph",
+    "bridges_culverts",
+    "aadt",
+    "traffic_growth_rate_pct",
+    "vdf",
+    "pavement_type",
+    "gsb_thickness_mm",
+    "wmm_thickness_mm",
+    "dbm_thickness_mm",
+    "bc_thickness_mm",
+    "concrete_thickness_mm",
+    "soil_type",
+    "subgrade_cbr_pct",
+    "bitumen_grade",
+    "aggregate_source_distance_km",
+    "material_quality_index",
+    "cement_grade",
+    "land_acquisition_complexity",
+    "rainfall_zone",
+    "utility_shifting_required",
+    "environmental_sensitivity",
+    "water_body_distance_m",
+    "soil_stabilization_required",
+    "labour_rate_inr_day",
+    "skilled_labour_pct",
+    "machinery_availability_pct",
+    "fuel_cost_inr_litre",
+    "equipment_productivity_index",
+    "contractor_experience_index",
+    "risk_level",
+    "contingency_pct",
+    "escalation_pct",
+    "prediction_status",
+]
+
+
+def _make_safe_value(value: Any) -> Any:
     """
-    Returns all projects that have completed predictions,
-    ordered by newest first.
+    Convert NumPy, pandas and date values into data that Supabase can
+    serialize safely.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+
+    # Converts values such as np.int64 and np.float64.
+    if hasattr(value, "item"):
+        try:
+            value = value.item()
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    return value
+
+
+def _build_project_payload(
+    project_data: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Keep only columns that exist in the Supabase projects table.
+    """
+    payload = {
+        column: _make_safe_value(project_data[column])
+        for column in PROJECT_INPUT_COLUMNS
+        if column in project_data
+    }
+
+    payload.setdefault("project_type", "New Construction")
+    payload.setdefault("prediction_status", "Pending")
+
+    required_fields = [
+        "project_name",
+        "location",
+        "road_category",
+        "terrain_type",
+    ]
+
+    missing_fields = [
+        field
+        for field in required_fields
+        if payload.get(field) is None
+        or str(payload.get(field)).strip() == ""
+    ]
+
+    if missing_fields:
+        raise ValueError(
+            "Missing required project fields: "
+            + ", ".join(missing_fields)
+        )
+
+    # Normalize text values.
+    payload["project_name"] = str(
+        payload["project_name"]
+    ).strip()
+
+    payload["location"] = str(
+        payload["location"]
+    ).strip()
+
+    payload["road_category"] = str(
+        payload["road_category"]
+    ).strip()
+
+    payload["terrain_type"] = str(
+        payload["terrain_type"]
+    ).strip()
+
+    return payload
+
+
+def _prediction_value(
+    prediction_data: dict[str, Any],
+    *possible_keys: str,
+) -> float:
+    """
+    Read a prediction while supporting both model keys and database keys.
+    """
+    for key in possible_keys:
+        if key in prediction_data:
+            value = _make_safe_value(prediction_data[key])
+
+            if value is None:
+                continue
+
+            try:
+                return float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Prediction value for {key!r} is not numeric: "
+                    f"{value!r}"
+                ) from exc
+
+    raise KeyError(
+        "Prediction is missing the required value. "
+        f"Supported keys: {possible_keys}. "
+        f"Available keys: {list(prediction_data.keys())}"
+    )
+
+
+def save_project(project_data: dict[str, Any]) -> int:
+    """
+    Save a project permanently in Supabase and return its generated ID.
+    """
+    supabase = get_supabase_client()
+    payload = _build_project_payload(project_data)
+
+    try:
+        response = (
+            supabase.table(TABLE_NAME)
+            .insert(payload)
+            .execute()
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to save project to Supabase: {exc}"
+        ) from exc
+
+    if not response.data:
+        raise RuntimeError(
+            "Supabase did not return the saved project."
+        )
+
+    return int(response.data[0]["id"])
+
+
+def get_all_projects() -> pd.DataFrame:
+    """
+    Return all projects, newest first.
+    """
+    supabase = get_supabase_client()
+
+    try:
+        response = (
+            supabase.table(TABLE_NAME)
+            .select("*")
+            .order("id", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to load projects from Supabase: {exc}"
+        ) from exc
+
+    records = response.data or []
+
+    if not records:
+        return pd.DataFrame()
+
+    return pd.DataFrame(records)
+
+
+def get_project_by_id(
+    project_id: int,
+) -> dict[str, Any] | None:
+    """
+    Return one complete project from Supabase.
+    """
+    supabase = get_supabase_client()
+    project_id = int(project_id)
+
+    try:
+        response = (
+            supabase.table(TABLE_NAME)
+            .select("*")
+            .eq("id", project_id)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to load project ID {project_id}: {exc}"
+        ) from exc
+
+    if not response.data:
+        return None
+
+    return dict(response.data[0])
+
+
+def project_exists(
+    project_name: str,
+    location: str,
+) -> bool:
+    """
+    Check whether the same project name and location already exist.
+    """
+    supabase = get_supabase_client()
+
+    normalized_name = str(project_name).strip()
+    normalized_location = str(location).strip()
+
+    if not normalized_name or not normalized_location:
+        return False
+
+    try:
+        response = (
+            supabase.table(TABLE_NAME)
+            .select("id,project_name,location")
+            .ilike("project_name", normalized_name)
+            .ilike("location", normalized_location)
+            .limit(10)
+            .execute()
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to check whether project exists: {exc}"
+        ) from exc
+
+    for row in response.data or []:
+        saved_name = str(
+            row.get("project_name", "")
+        ).strip().casefold()
+
+        saved_location = str(
+            row.get("location", "")
+        ).strip().casefold()
+
+        if (
+            saved_name == normalized_name.casefold()
+            and saved_location == normalized_location.casefold()
+        ):
+            return True
+
+    return False
+
+
+def update_project_prediction(
+    project_id: int,
+    prediction_data: dict[str, Any],
+) -> bool:
+    """
+    Save the five prediction outputs in their individual Supabase columns.
+
+    The deployed models currently use these keys:
+        total_cost
+        duration
+        material_index
+        manpower_hours_per_km
+        machinery_hours_per_km
+    """
+    supabase = get_supabase_client()
+    project_id = int(project_id)
+
+    payload = {
+        "prediction_status": "Completed",
+
+        "total_cost_lakhs": _prediction_value(
+            prediction_data,
+            "total_cost_lakhs",
+            "total_cost",
+        ),
+
+        "construction_duration_months": _prediction_value(
+            prediction_data,
+            "construction_duration_months",
+            "duration",
+        ),
+
+        "material_index": _prediction_value(
+            prediction_data,
+            "material_index",
+        ),
+
+        "manpower_hours_per_km": _prediction_value(
+            prediction_data,
+            "manpower_hours_per_km",
+        ),
+
+        "machinery_hours_per_km": _prediction_value(
+            prediction_data,
+            "machinery_hours_per_km",
+        ),
+
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    try:
+        existing = (
+            supabase.table(TABLE_NAME)
+            .select("id")
+            .eq("id", project_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not existing.data:
+            raise RuntimeError(
+                f"Project ID {project_id} does not exist in Supabase."
+            )
+
+        response = (
+            supabase.table(TABLE_NAME)
+            .update(payload)
+            .eq("id", project_id)
+            .execute()
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to save prediction for project "
+            f"ID {project_id}: {exc}"
+        ) from exc
+
+    if not response.data:
+        raise RuntimeError(
+            f"No project was updated for ID {project_id}."
+        )
+
+    return True
+
+
+def get_prediction_history() -> pd.DataFrame:
+    """
+    Return all completed projects, ordered from newest to oldest.
+
+    This represents the latest saved prediction for every project.
     """
     projects = get_all_projects()
 
     if projects.empty:
         return pd.DataFrame()
 
-    if "prediction_status" in projects.columns:
-        projects = projects[
-            projects["prediction_status"] == "Completed"
-        ]
+    if "prediction_status" not in projects.columns:
+        return pd.DataFrame()
 
-    if "created_at" in projects.columns:
-        projects = projects.sort_values(
+    completed = projects[
+        projects["prediction_status"]
+        .astype(str)
+        .str.strip()
+        .str.casefold()
+        == "completed"
+    ].copy()
+
+    if completed.empty:
+        return completed
+
+    if "created_at" in completed.columns:
+        completed["created_at"] = pd.to_datetime(
+            completed["created_at"],
+            errors="coerce",
+            utc=True,
+        )
+
+        completed = completed.sort_values(
             by="created_at",
             ascending=False,
         )
 
-    return projects
+    return completed.reset_index(drop=True)
 
-def save_prediction_history(project_id, prediction_data):
-    conn = get_connection()
 
-    try:
-        cursor = conn.cursor()
+def save_prediction_history(
+    project_id: int,
+    prediction_data: dict[str, Any],
+) -> None:
+    """
+    Compatibility function.
 
-        cursor.execute(
-            """
-            INSERT INTO prediction_history (
-                project_id,
-                prediction_data
-            )
-            VALUES (?, ?)
-            """,
-            (
-                int(project_id),
-                json.dumps(prediction_data),
-            ),
-        )
+    Your current Supabase schema has no separate prediction_history table.
+    The latest prediction is already saved in the projects table by
+    update_project_prediction().
 
-        conn.commit()
+    Keep this function so old imports do not break.
+    """
+    return None
 
-    except Exception:
-        conn.rollback()
-        raise
 
-    finally:
-        conn.close()
-        
-
-def save_project(project_data):
-    conn = get_connection()
+def delete_project(project_id: int) -> bool:
+    """
+    Delete one project from Supabase.
+    """
+    supabase = get_supabase_client()
+    project_id = int(project_id)
 
     try:
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            INSERT INTO projects (
-                project_name,
-                location,
-                road_category,
-                terrain_type,
-                road_length_km,
-                number_of_lanes,
-                design_speed_kmph,
-                aadt,
-                subgrade_cbr_pct,
-                risk_level,
-                prediction_status,
-                project_data
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                project_data["project_name"],
-                project_data["location"],
-                project_data["road_category"],
-                project_data["terrain_type"],
-                project_data["road_length_km"],
-                project_data["number_of_lanes"],
-                project_data["design_speed_kmph"],
-                project_data["aadt"],
-                project_data["subgrade_cbr_pct"],
-                project_data["risk_level"],
-                project_data.get("prediction_status", "Pending"),
-                json.dumps(project_data),
-            ),
+        response = (
+            supabase.table(TABLE_NAME)
+            .delete()
+            .eq("id", project_id)
+            .execute()
         )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to delete project ID {project_id}: {exc}"
+        ) from exc
 
-        new_project_id = cursor.lastrowid
-        conn.commit()
-
-        return new_project_id
-
-    except Exception:
-        conn.rollback()
-        raise
-    
-    finally:
-        conn.close()
-
-def get_all_projects():
-    conn = get_connection()
-
-    try:
-        return pd.read_sql_query(
-            """
-            SELECT
-                id,
-                project_name,
-                location,
-                road_category,
-                terrain_type,
-                road_length_km,
-                number_of_lanes,
-                design_speed_kmph,
-                aadt,
-                subgrade_cbr_pct,
-                risk_level,
-                prediction_status,
-                prediction_data,
-                project_data,
-                created_at
-            FROM projects
-            ORDER BY id DESC
-            """,
-            conn,
-        )
-
-    finally:
-        conn.close()
+    return bool(response.data)
 
 
-def get_project_by_id(project_id): #no
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor() 
-
-        cursor.execute(
-            """
-            SELECT
-                id,
-                project_name,
-                location,
-                road_category,
-                terrain_type,
-                road_length_km,
-                number_of_lanes,
-                design_speed_kmph,
-                aadt,
-                subgrade_cbr_pct,
-                risk_level,
-                prediction_status,
-                prediction_data,
-                project_data,
-                created_at
-            FROM projects
-            WHERE id = ?
-            LIMIT 1
-            """,
-            (int(project_id),),
-        )
-
-        row = cursor.fetchone()
-
-        if row is None:
-            return None
-
-        columns = [description[0] for description in cursor.description]
-        record = dict(zip(columns, row))
-
-        # Return the full saved project input dictionary when available
-        if record.get("project_data"):
-            try:
-                saved_project_data = json.loads(record["project_data"])
-                saved_project_data["id"] = record["id"]
-                saved_project_data["prediction_status"] = record["prediction_status"]
-                saved_project_data["prediction_data"] = record["prediction_data"]
-                saved_project_data["created_at"] = record["created_at"]
-                return saved_project_data
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        return record
-
-    finally:
-        conn.close()
-
-
-def project_exists(project_name, location): #no
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT id
-            FROM projects
-            WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(?))
-              AND LOWER(TRIM(location)) = LOWER(TRIM(?))
-            LIMIT 1
-            """,
-            (
-                project_name.strip(),
-                location.strip(),
-            ),
-        )
-        return cursor.fetchone() is not None
-
-    finally:
-        conn.close()
-
-
-def update_project_prediction(project_id, prediction_data):
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor()
-
-        project_id = int(project_id)
-
-        cursor.execute(
-            """
-            SELECT id
-            FROM projects
-            WHERE id = ?
-            """,
-            (project_id,),
-        )
-
-        existing_project = cursor.fetchone()
-
-        if existing_project is None:
-            raise RuntimeError(
-                f"Project ID {project_id} does not exist in the active database."
-            )
-
-        cursor.execute(
-            """
-            UPDATE projects
-            SET
-                prediction_status = ?,
-                prediction_data = ?
-            WHERE id = ?
-            """,
-            (
-                "Completed",
-                json.dumps(prediction_data),
-                project_id,
-            ),
-        )
-
-        conn.commit()
-
-        save_prediction_history(
-            project_id,
-            prediction_data,
-        )
-
-        return True
-
-    except Exception:
-        conn.rollback()
-        raise
-
-    finally:
-        conn.close()
-        
-
-def delete_project(project_id):
-    conn = get_connection()
-
-    try:
-        cursor = conn.cursor()
-        project_id = int(project_id)
-
-        cursor.execute(
-            """
-            DELETE FROM prediction_history
-            WHERE project_id = ?
-            """,
-            (project_id,),
-        )
-
-        cursor.execute(
-            """
-            DELETE FROM projects
-            WHERE id = ?
-            """,
-            (project_id,),
-        )
-
-        deleted_rows = cursor.rowcount
-        conn.commit()
-
-        return deleted_rows > 0
-
-    except Exception:
-        conn.rollback()
-        raise
-
-    finally:
-        conn.close()
-        
 def delete_duplicate_projects() -> int:
-    conn = get_connection()
+    """
+    Delete older projects having the same normalized name and location.
 
-    try:
-        cursor = conn.cursor()
+    Keeps the project with the highest ID.
+    """
+    projects = get_all_projects()
 
-        cursor.execute(
-            """
-            DELETE FROM projects
-            WHERE id NOT IN (
-                SELECT MAX(id)
-                FROM projects
-                GROUP BY
-                    LOWER(TRIM(project_name)),
-                    LOWER(TRIM(location))
-            )
-            """
+    if projects.empty:
+        return 0
+
+    required_columns = {
+        "id",
+        "project_name",
+        "location",
+    }
+
+    if not required_columns.issubset(projects.columns):
+        return 0
+
+    sorted_projects = projects.sort_values(
+        by="id",
+        ascending=False,
+    )
+
+    seen: set[tuple[str, str]] = set()
+    duplicate_ids: list[int] = []
+
+    for row in sorted_projects.itertuples():
+        key = (
+            str(row.project_name).strip().casefold(),
+            str(row.location).strip().casefold(),
         )
 
-        deleted_count = cursor.rowcount
-        conn.commit()
+        if key in seen:
+            duplicate_ids.append(int(row.id))
+        else:
+            seen.add(key)
 
-        return deleted_count
+    deleted_count = 0
 
-    except Exception:
-        conn.rollback()
-        raise
+    for project_id in duplicate_ids:
+        if delete_project(project_id):
+            deleted_count += 1
 
-    finally:
-        conn.close()
+    return deleted_count

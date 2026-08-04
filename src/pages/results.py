@@ -142,24 +142,24 @@ def safe_float(value, default=0.0):
     except (TypeError, ValueError):
         return default
 
-def normalize_prediction_data(prediction_data):
-    return {
-        "total_cost": prediction_data.get(
-            "total_cost",
-            prediction_data.get("total_cost_lakhs")
-        ),
-        "duration": prediction_data.get(
-            "duration",
-            prediction_data.get("construction_duration_months")
-        ),
-        "material_index": prediction_data.get("material_index"),
-        "manpower_hours_per_km": prediction_data.get(
-            "manpower_hours_per_km"
-        ),
-        "machinery_hours_per_km": prediction_data.get(
-            "machinery_hours_per_km"
-        ),
-    }
+# def normalize_prediction_data(prediction_data):
+#     return {
+#         "total_cost": prediction_data.get(
+#             "total_cost",
+#             prediction_data.get("total_cost_lakhs")
+#         ),
+#         "duration": prediction_data.get(
+#             "duration",
+#             prediction_data.get("construction_duration_months")
+#         ),
+#         "material_index": prediction_data.get("material_index"),
+#         "manpower_hours_per_km": prediction_data.get(
+#             "manpower_hours_per_km"
+#         ),
+#         "machinery_hours_per_km": prediction_data.get(
+#             "machinery_hours_per_km"
+#         ),
+#     }
 
 def build_project_timeline(duration):
     phases = [
@@ -249,40 +249,14 @@ def render_results():
     #     ].to_dict()
     # )
 
-    raw_prediction_data = selected_row.get("prediction_data")
+    prediction_data = {
+        "total_cost": selected_row["total_cost_lakhs"],
+        "duration": selected_row["construction_duration_months"],
+        "material_index": selected_row["material_index"],
+        "manpower_hours_per_km": selected_row["manpower_hours_per_km"],
+        "machinery_hours_per_km": selected_row["machinery_hours_per_km"],
+    }
 
-    if raw_prediction_data is None or pd.isna(raw_prediction_data):
-        st.warning(
-            "This project does not have saved prediction data. "
-            "Run the prediction again from the Prediction page."
-        )
-        return
-
-    try:
-        if isinstance(raw_prediction_data, str):
-            prediction_data = json.loads(raw_prediction_data)
-        elif isinstance(raw_prediction_data, dict):
-            prediction_data = raw_prediction_data
-        else:
-            raise TypeError(
-                "Saved prediction data has an unsupported format."
-            )
-
-        prediction_data = normalize_prediction_data(
-            prediction_data
-        )
-
-    except (json.JSONDecodeError, TypeError, ValueError) as error:
-        friendly_error_box(
-            "Prediction results could not be loaded.",
-            possible_reasons=[
-                "Saved prediction data is missing",
-                "Prediction data is corrupted",
-                "The selected project has incomplete results",
-            ],
-            technical_error=error,
-        )
-        return
 
 
     required_prediction_fields = [
@@ -492,53 +466,18 @@ def render_results():
             ).iterrows(),
             start=1,
         ):
-            raw_history_prediction = row.get("prediction_data")
-
-            try:
-                if isinstance(raw_history_prediction, str):
-                    history_prediction = json.loads(
-                        raw_history_prediction
-                    )
-                elif isinstance(raw_history_prediction, dict):
-                    history_prediction = raw_history_prediction
-                else:
-                    continue
-
-                history_prediction = normalize_prediction_data(
-                    history_prediction
-                )
-
-            except (json.JSONDecodeError, TypeError, ValueError):
-                continue
-
-            row_total_cost = safe_float(
-                history_prediction.get("total_cost")
-            )
-            row_duration = safe_float(
-                history_prediction.get("duration")
-            )
-            row_material = safe_float(
-                history_prediction.get("material_index")
-            )
-            row_manpower = safe_float(
-                history_prediction.get("manpower_hours_per_km")
-            )
-            row_machinery = safe_float(
-                history_prediction.get("machinery_hours_per_km")
-            )
-
             history_rows.append({
                 "Run": f"Prediction {run_number}",
                 "Timestamp": row.get("created_at", ""),
                 "Total Cost": format_cost_lakhs_as_cr(
-                    row_total_cost
+                    safe_float(row["total_cost_lakhs"])
                 ),
-                "Duration": f"{row_duration:.2f} months",
-                "Material Index": f"{row_material:.2f}",
-                "Manpower/km": f"{row_manpower:.2f}",
-                "Machinery/km": f"{row_machinery:.2f}",
+                "Duration": f"{safe_float(row['construction_duration_months']):.2f} months",
+                "Material Index": f"{safe_float(row['material_index']):.2f}",
+                "Manpower/km": f"{safe_float(row['manpower_hours_per_km']):.2f}",
+                "Machinery/km": f"{safe_float(row['machinery_hours_per_km']):.2f}",
             })
-
+            
         if history_rows:
             history_display_df = pd.DataFrame(history_rows)
 

@@ -30,7 +30,7 @@ ensure_models()
 apply_theme()
 init_database()
 if "demo_seeded" not in st.session_state:
-    seed_demo_projects()
+    #seed_demo_projects()
     st.session_state["demo_seeded"] = True
 
 page = render_sidebar()
